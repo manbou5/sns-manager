@@ -5,6 +5,7 @@ import Link from "next/link";
 import { BenchmarkCsvImport } from "@/components/BenchmarkCsvImport";
 import { decodeTags } from "@/lib/benchmarkCsv";
 import { GROWTH_REASON_TAGS } from "@/types";
+import { useToast } from "@/components/Toast";
 import type { BenchmarkPost, MediaType } from "@/types";
 import { format } from "date-fns";
 import { ja } from "date-fns/locale";
@@ -51,10 +52,41 @@ function fmt(n: number): string {
 
 // ─── コンポーネント ────────────────────────────────────────────────────────────
 
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
+
+function TableSkeleton() {
+  return (
+    <div className="card p-0 overflow-hidden animate-pulse">
+      <div className="bg-gray-50 border-b border-gray-100 px-4 py-3 flex gap-4">
+        {[30, 100, 80, 50, 50, 50, 50, 60, 120, 140].map((w, i) => (
+          <div key={i} className="h-4 bg-gray-200 rounded" style={{ width: w }} />
+        ))}
+      </div>
+      {[...Array(6)].map((_, i) => (
+        <div key={i} className="flex items-center gap-4 px-4 py-3 border-b border-gray-50">
+          <div className="w-5 h-4 bg-gray-100 rounded" />
+          <div className="w-24 h-4 bg-gray-200 rounded" />
+          <div className="w-16 h-4 bg-gray-100 rounded" />
+          <div className="w-8 h-4 bg-gray-100 rounded" />
+          {[40, 40, 40, 40].map((w, j) => (
+            <div key={j} className="h-4 bg-gray-100 rounded" style={{ width: w }} />
+          ))}
+          <div className="flex-1 h-4 bg-gray-100 rounded" />
+          <div className="w-20 h-4 bg-gray-100 rounded" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
 export default function BenchmarkPage() {
+  const { toast } = useToast();
   const [allPosts,      setAllPosts]      = useState<BenchmarkPost[]>([]);
   const [loading,       setLoading]       = useState(true);
   const [expandedId,    setExpandedId]    = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // フィルター状態
   const [filterAccount,   setFilterAccount]   = useState("");
@@ -101,10 +133,16 @@ export default function BenchmarkPage() {
 
   const hasFilter = filterAccount !== "" || filterMediaType !== "" || filterTag !== "";
 
-  const handleDelete = async (id: string, accountName: string) => {
-    if (!confirm(`「${accountName}」の投稿を削除しますか？`)) return;
-    await fetch(`/api/benchmark/${id}`, { method: "DELETE" });
-    fetchPosts();
+  const handleDelete = async (id: string) => {
+    setConfirmDeleteId(null);
+    try {
+      const res = await fetch(`/api/benchmark/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      toast("削除しました", "success");
+      fetchPosts();
+    } catch {
+      toast("削除に失敗しました", "error");
+    }
   };
 
   const toggleExpand = (id: string) => {
@@ -231,16 +269,20 @@ export default function BenchmarkPage() {
 
       {/* テーブル */}
       {loading ? (
-        <div className="card text-center text-gray-400 py-12">読み込み中...</div>
+        <TableSkeleton />
       ) : filteredPosts.length === 0 ? (
-        <div className="card text-center py-12">
-          <p className="text-gray-400 mb-4">
-            {hasFilter ? "条件に一致するデータがありません" : "データがまだありません"}
+        <div className="card text-center py-14">
+          <p className="text-4xl mb-3">{hasFilter ? "🔍" : "📊"}</p>
+          <p className="text-gray-600 font-medium">
+            {hasFilter ? "条件に一致するデータがありません" : "ベンチマークデータがまだありません"}
           </p>
           {!hasFilter && (
-            <Link href="/benchmark/new" className="btn-primary inline-block">
-              最初のデータを登録する
-            </Link>
+            <>
+              <p className="text-gray-400 text-sm mt-1">参考アカウントの投稿を登録してみましょう</p>
+              <Link href="/benchmark/new" className="btn-primary inline-block mt-5 text-sm">
+                最初のデータを登録する
+              </Link>
+            </>
           )}
         </div>
       ) : (
@@ -349,7 +391,7 @@ export default function BenchmarkPage() {
 
                         {/* 操作 */}
                         <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex gap-3 justify-end whitespace-nowrap">
+                          <div className="flex gap-3 justify-end items-center whitespace-nowrap">
                             {post.postUrl && (
                               <a
                                 href={post.postUrl}
@@ -366,12 +408,29 @@ export default function BenchmarkPage() {
                             >
                               編集
                             </Link>
-                            <button
-                              onClick={() => handleDelete(post.id, post.accountName)}
-                              className="text-red-400 hover:text-red-600 text-xs"
-                            >
-                              削除
-                            </button>
+                            {confirmDeleteId === post.id ? (
+                              <span className="flex items-center gap-1">
+                                <button
+                                  onClick={() => handleDelete(post.id)}
+                                  className="text-xs px-2 py-1 bg-red-500 hover:bg-red-600 text-white rounded transition-colors"
+                                >
+                                  確認
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDeleteId(null)}
+                                  className="text-xs text-gray-400 hover:text-gray-600"
+                                >
+                                  ✕
+                                </button>
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => setConfirmDeleteId(post.id)}
+                                className="text-red-400 hover:text-red-600 text-xs transition-colors"
+                              >
+                                削除
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

@@ -27,4 +27,17 @@
   .label {
     @apply block text-sm font-medium text-gray-700 mb-1;
   }
+  /* Sortable table header button */
+  .th-sort {
+    @apply flex items-center gap-1 hover:text-gray-700 transition-colors whitespace-nowrap;
+  }
+}
+
+/* Toast slide-in animation */
+@keyframes toast-enter {
+  from { transform: translateX(110%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+.toast-enter {
+  animation: toast-enter 0.22s cubic-bezier(0.16, 1, 0.3, 1);
 }

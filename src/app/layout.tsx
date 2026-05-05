@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Navigation } from "@/components/Navigation";
+import { ToastProvider } from "@/components/Toast";
 
 export const metadata: Metadata = {
   title: "SNS Manager - AIキャラクター運用",
@@ -15,10 +16,13 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body>
-        <div className="flex min-h-screen">
+        <ToastProvider>
           <Navigation />
-          <main className="flex-1 p-8 overflow-auto">{children}</main>
-        </div>
+          {/* md+: left padding for fixed sidebar / mobile: top padding for mobile header */}
+          <main className="min-h-screen pt-12 md:pt-0 md:pl-56">
+            <div className="p-4 md:p-8">{children}</div>
+          </main>
+        </ToastProvider>
       </body>
     </html>
   );
