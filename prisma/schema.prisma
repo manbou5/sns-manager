@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// 投稿テーブル
+model Post {
+  id          String     @id @default(cuid())
+  title       String?
+  caption     String
+  mediaPath   String?
+  // "X" | "INSTAGRAM" | "BOTH"
+  platform    String     @default("X")
+  // "FASHION" | "LIFESTYLE" | "PORTRAIT" | "GRAVURE_STYLE" | "OTHER"
+  genre       String     @default("LIFESTYLE")
+  hashtags    String?
+  scheduledAt DateTime?
+  postedAt    DateTime?
+  // "DRAFT" | "SCHEDULED" | "PENDING_CONFIRMATION" | "POSTED" | "FAILED"
+  status      String     @default("DRAFT")
+  errorMsg    String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  analytics   Analytics?
+}
+
+// 分析データテーブル
+model Analytics {
+  id           String   @id @default(cuid())
+  postId       String   @unique
+  post         Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  impressions  Int      @default(0)
+  likes        Int      @default(0)
+  reposts      Int      @default(0)
+  clicks       Int      @default(0)
+  followerGain Int      @default(0)
+  recordedAt   DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ベンチマーク分析テーブル（参考アカウントの投稿データ）
+model BenchmarkPost {
+  id               String    @id @default(cuid())
+
+  // アカウント・投稿識別
+  accountName      String
+  postUrl          String?
+  postedAt         DateTime?
+
+  // コンテンツ
+  bodyText         String?
+  // "IMAGE" | "VIDEO" | "MIXED"
+  mediaType        String    @default("IMAGE")
+  videoDuration    String?
+
+  // 制作観察メモ
+  compositionNote  String?
+  characterNote    String?
+  aiReductionNote  String?
+
+  // エンゲージメント
+  likes            Int       @default(0)
+  reposts          Int       @default(0)
+  replies          Int       @default(0)
+  views            Int       @default(0)
+
+  // 分析メモ
+  growthReasonNote String?
+  // "|構図|表情|" 形式（先頭・末尾に | を付与して完全一致検索を可能にする）
+  growthReasonTags String?
+  applicationNote  String?
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+// 生成コンテンツ管理テーブル（AIプロンプト・投稿案のコンテンツバンク）
+model GeneratedContent {
+  id                    String      @id @default(cuid())
+  title                 String?
+  // 画像生成AI・LLMへの指示プロンプト
+  prompt                String?
+  caption               String?
+  hashtags              String?
+  // "IMAGE" | "VIDEO" | "MIXED"
+  mediaType             String      @default("IMAGE")
+  mediaUrl              String?
+  // "draft" | "ready" | "scheduled" | "posted"
+  status                String      @default("draft")
+  // 参照元ベンチマーク投稿ID（任意、トレーサビリティ用）
+  sourceBenchmarkPostId String?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  postQueues            PostQueue[]
+}
+
+// 投稿キュー（GeneratedContent を SNS 投稿フローに送るためのキュー）
+model PostQueue {
+  id                 String              @id @default(cuid())
+  generatedContentId String
+  generatedContent   GeneratedContent    @relation(fields: [generatedContentId], references: [id], onDelete: Cascade)
+  // "X" | "INSTAGRAM" | "BOTH"
+  platform           String              @default("X")
+  scheduledAt        DateTime?
+  // "queued" | "posted" | "failed" | "cancelled"
+  status             String              @default("queued")
+  // 実 SNS 投稿後に付与する外部 ID（現時点では未使用）
+  externalPostId     String?
+  errorMessage       String?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  performanceMetrics PerformanceMetric[]
+}
+
+// 投稿実績（PostQueue の投稿済みエントリに対する SNS パフォーマンス計測）
+model PerformanceMetric {
+  id              String    @id @default(cuid())
+  postQueueId     String
+  postQueue       PostQueue @relation(fields: [postQueueId], references: [id], onDelete: Cascade)
+  // 計測時のプラットフォーム（PostQueue.platform を引き継ぐが手動補正も可）
+  platform        String
+  views           Int       @default(0)
+  likes           Int       @default(0)
+  comments        Int       @default(0)
+  shares          Int       @default(0)
+  saves           Int       @default(0)
+  followersGained Int       @default(0)
+  // views > 0 の場合: (likes + comments + shares + saves) / views * 100
+  engagementRate  Float     @default(0)
+  measuredAt      DateTime  @default(now())
+  createdAt       DateTime  @default(now())
+}
