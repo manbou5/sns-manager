@@ -67,6 +67,30 @@ export function parseCSV(rawText: string): string[][] {
   return rows;
 }
 
+// ─── タグ自動提案 ──────────────────────────────────────────────────────────────
+
+/**
+ * キャプション本文とメディア種別からルールベースでタグを提案する。
+ * GROWTH_REASON_TAGS の値のみを返す。クライアント・サーバー両側から使用可。
+ */
+export function suggestTagsFromContent(caption: string, mediaType: string): string[] {
+  const suggested = new Set<string>();
+  const t = caption.toLowerCase();
+
+  if (/服|ドレス|コーデ|ファッション|衣装|ワンピ|スカート|水着|outfit/.test(t)) suggested.add("服装");
+  if (/笑|嬉し|喜び|微笑|スマイル|表情|顔アップ|かわい|cute/.test(t))         suggested.add("表情");
+  if (/背景|ロケ|屋外|屋内|スタジオ|海|山|街|空|夕焼け|夜景|室内|公園/.test(t)) suggested.add("背景");
+  if (/構図|アングル|フレーミング|ポーズ|俯瞰|ローアングル|アップ/.test(t))    suggested.add("構図");
+  if (caption.length > 30 || /[？?！!]/.test(caption))                        suggested.add("キャプション");
+  if (/#/.test(caption))                                                        suggested.add("ハッシュタグ");
+  if (mediaType === "VIDEO" || mediaType === "MIXED") {
+    suggested.add("動画テンポ");
+    suggested.add("カメラワーク");
+  }
+
+  return Array.from(suggested);
+}
+
 // ─── タグ ユーティリティ ───────────────────────────────────────────────────────
 
 /**
@@ -209,6 +233,10 @@ export function parseBenchmarkRow(
   if (errors.length > 0) return { ok: false, errors };
 
   const rawTags = parseTagsFromCsv(get("growthReasonTags"));
+  // タグが未指定の場合、キャプションとメディア種別からルールベースで自動提案
+  const finalTags = rawTags.length > 0
+    ? rawTags
+    : suggestTagsFromContent(get("bodyText"), mediaType);
 
   return {
     ok: true,
@@ -227,7 +255,7 @@ export function parseBenchmarkRow(
       replies: nums.replies,
       views: nums.views,
       growthReasonNote: get("growthReasonNote") || null,
-      growthReasonTags: encodeTags(rawTags),
+      growthReasonTags: encodeTags(finalTags),
       applicationNote: get("applicationNote") || null,
     },
   };

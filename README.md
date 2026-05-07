@@ -94,28 +94,73 @@ npm run dev
 
 ---
 
-## API 連携の追加方法
+## X (Twitter) API 設定手順
 
-### X (Twitter) API
+### 1. Developer Portal でアプリを作成
 
-1. `.env.local` に以下を追加:
-   ```
-   X_API_KEY=...
-   X_API_SECRET=...
-   X_ACCESS_TOKEN=...
-   X_ACCESS_TOKEN_SECRET=...
-   ```
-2. `npm install twitter-api-v2` を実行
-3. `src/lib/publisher/twitter.ts` の TODO コメント箇所を実装
+1. [https://developer.twitter.com/en/portal/dashboard](https://developer.twitter.com/en/portal/dashboard) にアクセスし、プロジェクトとアプリを作成します。
+2. アプリの **User authentication settings** を開き、以下を設定:
+   - **App permissions**: `Read and Write`
+   - **Type of App**: `Web App, Automated App or Bot`
+   - **Callback URI / Redirect URL**: 任意（例: `http://localhost:3000/callback`）
+   - **Website URL**: 任意（例: `http://localhost:3000`）
+3. **Keys and Tokens** タブから以下の値を取得します:
 
-### Instagram API
+| 環境変数 | 取得元 |
+|----------|--------|
+| `X_API_KEY` | API Key (Consumer Key) |
+| `X_API_SECRET` | API Key Secret (Consumer Secret) |
+| `X_ACCESS_TOKEN` | Access Token |
+| `X_ACCESS_TOKEN_SECRET` | Access Token Secret |
 
-1. `.env.local` に以下を追加:
-   ```
-   INSTAGRAM_ACCESS_TOKEN=...
-   INSTAGRAM_BUSINESS_ACCOUNT_ID=...
-   ```
-2. `src/lib/publisher/instagram.ts` の TODO コメント箇所を実装
+> **注意**: Access Token / Secret は「Generate」ボタンで発行してください。  
+> OAuth 1.0a 署名に **Read and Write** スコープが必要です。
+
+### 2. .env.local に設定
+
+`.env.example` をコピーして `.env.local` を作成し、取得した値を記入します:
+
+```bash
+cp .env.example .env.local
+```
+
+```env
+X_API_KEY="your-api-key"
+X_API_SECRET="your-api-secret"
+X_ACCESS_TOKEN="your-access-token"
+X_ACCESS_TOKEN_SECRET="your-access-token-secret"
+ENABLE_REAL_X_POSTING="true"
+```
+
+### 3. 投稿モードの切り替え
+
+| `ENABLE_REAL_X_POSTING` | 動作 |
+|------------------------|------|
+| `"true"` かつ全環境変数が設定済み | **本番投稿モード** — X API v2 で実際に投稿 |
+| それ以外（未設定 / `"false"`） | **ダミー投稿モード** — ログ出力のみ、SNS には送信しない |
+
+投稿キュー画面（`/queue`）のヘッダーに現在のモードがバッジで表示されます。
+
+### 4. 動作確認
+
+```bash
+# ダミーモードで自動投稿を手動実行
+curl -X POST http://localhost:3000/api/queue/auto-post
+
+# 現在の投稿モードを確認
+curl http://localhost:3000/api/queue/posting-mode
+```
+
+---
+
+## Instagram API 設定（予定）
+
+```env
+INSTAGRAM_ACCESS_TOKEN=...
+INSTAGRAM_BUSINESS_ACCOUNT_ID=...
+```
+
+現在はダミー投稿（ログ出力のみ）です。Instagram Graph API の実装は今後追加予定です。
 
 ---
 

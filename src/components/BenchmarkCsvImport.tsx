@@ -6,16 +6,17 @@ import type { BenchmarkImportError } from "@/types";
 
 interface ImportResult {
   imported: number;
-  errors: BenchmarkImportError[];
+  skipped:  number;
+  errors:   BenchmarkImportError[];
 }
 
-// プレビューで表示するカラム（16列全部は多すぎるので主要5列のみ）
+// プレビューで表示するカラム
 const PREVIEW_COLS = [
-  "accountName",
-  "mediaType",
-  "likes",
-  "views",
-  "growthReasonTags",
+  { key: "accountName",      label: "アカウント" },
+  { key: "mediaType",        label: "メディア"   },
+  { key: "views",            label: "表示数"     },
+  { key: "likes",            label: "いいね"     },
+  { key: "growthReasonTags", label: "タグ"       },
 ] as const;
 
 interface Props {
@@ -24,15 +25,15 @@ interface Props {
 
 export function BenchmarkCsvImport({ onImportComplete }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isOpen,     setIsOpen]     = useState(false);
-  const [file,       setFile]       = useState<File | null>(null);
-  const [preview,    setPreview]    = useState<string[][]>([]);      // [rows][cols] of preview values
-  const [previewHeaders, setPreviewHeaders] = useState<string[]>([]);
-  const [totalRows,  setTotalRows]  = useState(0);
-  const [parseError, setParseError] = useState<string | null>(null);
-  const [importing,  setImporting]  = useState(false);
-  const [result,     setResult]     = useState<ImportResult | null>(null);
-  const [fatalError, setFatalError] = useState<string | null>(null);
+  const [isOpen,      setIsOpen]      = useState(false);
+  const [file,        setFile]        = useState<File | null>(null);
+  const [preview,     setPreview]     = useState<string[][]>([]);
+  const [previewCols, setPreviewCols] = useState<string[]>([]);
+  const [totalRows,   setTotalRows]   = useState(0);
+  const [parseError,  setParseError]  = useState<string | null>(null);
+  const [importing,   setImporting]   = useState(false);
+  const [result,      setResult]      = useState<ImportResult | null>(null);
+  const [fatalError,  setFatalError]  = useState<string | null>(null);
 
   const downloadSample = () => {
     const content = generateBenchmarkSampleCsv();
@@ -67,14 +68,13 @@ export function BenchmarkCsvImport({ onImportComplete }: Props) {
       return;
     }
 
-    const headers = rows[0];
+    const headers      = rows[0];
     const lowerHeaders = headers.map((h) => h.toLowerCase());
 
-    // 必須カラムの存在確認（全16カラム）
     const REQUIRED = [
       "accountname","posturl","postedat","bodytext","mediatype","videoduration",
       "compositionnote","characternote","aireductionnote","likes","reposts",
-      "replies","views","growthreasonnote","growthreasontags","applicationnote"
+      "replies","views","growthreasonnote","growthreasontags","applicationnote",
     ];
     const missing = REQUIRED.filter((r) => !lowerHeaders.includes(r));
     if (missing.length > 0) {
@@ -82,15 +82,11 @@ export function BenchmarkCsvImport({ onImportComplete }: Props) {
       return;
     }
 
-    // プレビュー用インデックス
-    const previewColIndices = PREVIEW_COLS.map((c) =>
-      lowerHeaders.indexOf(c.toLowerCase())
-    );
-    const previewHeaderLabels = PREVIEW_COLS.map((c) => c);
-    setPreviewHeaders(previewHeaderLabels);
+    const indices = PREVIEW_COLS.map((c) => lowerHeaders.indexOf(c.key.toLowerCase()));
+    setPreviewCols(PREVIEW_COLS.map((c) => c.label));
 
     const previewRows = rows.slice(1, 4).map((row) =>
-      previewColIndices.map((i) => row[i] ?? "")
+      indices.map((i) => row[i] ?? "")
     );
     setPreview(previewRows);
     setTotalRows(rows.length - 1);
@@ -113,7 +109,7 @@ export function BenchmarkCsvImport({ onImportComplete }: Props) {
         return;
       }
       setResult(data as ImportResult);
-      if (data.imported > 0) onImportComplete();
+      if ((data as ImportResult).imported > 0) onImportComplete();
     } catch {
       setFatalError("通信エラーが発生しました");
     } finally {
@@ -124,13 +120,16 @@ export function BenchmarkCsvImport({ onImportComplete }: Props) {
   const handleReset = () => {
     setFile(null);
     setPreview([]);
-    setPreviewHeaders([]);
+    setPreviewCols([]);
     setResult(null);
     setFatalError(null);
     setParseError(null);
     setTotalRows(0);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
+
+  const errorCount    = result ? result.errors.filter((e) => !e.message.startsWith("重複:")).length : 0;
+  const duplicateCount = result ? result.skipped : 0;
 
   return (
     <div className="card">
@@ -139,9 +138,7 @@ export function BenchmarkCsvImport({ onImportComplete }: Props) {
         onClick={() => setIsOpen((v) => !v)}
         className="w-full flex items-center justify-between text-left"
       >
-        <span className="font-semibold text-gray-900">
-          📥 CSVで一括インポート
-        </span>
+        <span className="font-semibold text-gray-900">📥 CSVで一括インポート</span>
         <span className="text-gray-400 text-sm">{isOpen ? "▲ 閉じる" : "▼ 開く"}</span>
       </button>
 
@@ -150,17 +147,14 @@ export function BenchmarkCsvImport({ onImportComplete }: Props) {
           {/* フォーマット説明 */}
           <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 space-y-1">
             <p className="font-medium text-gray-700">CSVフォーマット（16カラム）</p>
-            <p className="font-mono break-all">
+            <p className="font-mono break-all text-gray-500">
               accountName, postUrl, postedAt, bodyText, mediaType, videoDuration,
               compositionNote, characterNote, aiReductionNote, likes, reposts,
               replies, views, growthReasonNote, <strong>growthReasonTags</strong>, applicationNote
             </p>
-            <p className="mt-1">
-              ※ <code>growthReasonTags</code> は <code>|</code> 区切り（例: <code>構図|表情</code>）
-            </p>
-            <p>
-              ※ テキストにカンマが含まれる場合はダブルクォートで囲んでください
-            </p>
+            <p>※ <code>growthReasonTags</code> は <code>|</code> 区切り（例: <code>構図|表情</code>）。
+              空欄の場合はキャプション・メディア種別からタグを自動提案します。</p>
+            <p>※ <code>postUrl</code> が既存レコードと一致する行は重複としてスキップされます。</p>
           </div>
 
           <div className="flex gap-3">
@@ -203,7 +197,7 @@ export function BenchmarkCsvImport({ onImportComplete }: Props) {
                 <table className="w-full text-xs">
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
-                      {previewHeaders.map((h) => (
+                      {previewCols.map((h) => (
                         <th key={h} className="text-left px-3 py-2 text-gray-500 font-medium whitespace-nowrap">
                           {h}
                         </th>
@@ -236,35 +230,72 @@ export function BenchmarkCsvImport({ onImportComplete }: Props) {
           {/* インポート結果 */}
           {result && (
             <div className="space-y-3">
-              <div
-                className={`rounded-lg p-4 border ${
-                  result.errors.length === 0
-                    ? "bg-green-50 border-green-200"
-                    : "bg-yellow-50 border-yellow-200"
-                }`}
-              >
-                <p className={`font-semibold text-sm ${
-                  result.errors.length === 0 ? "text-green-700" : "text-yellow-700"
+              {/* サマリーカード */}
+              <div className={`rounded-lg p-4 border ${
+                errorCount === 0 && duplicateCount === 0
+                  ? "bg-green-50 border-green-200"
+                  : errorCount === 0
+                  ? "bg-yellow-50 border-yellow-200"
+                  : "bg-red-50 border-red-200"
+              }`}>
+                <p className={`font-semibold text-sm mb-3 ${
+                  errorCount === 0 && duplicateCount === 0
+                    ? "text-green-700"
+                    : errorCount === 0
+                    ? "text-yellow-700"
+                    : "text-red-700"
                 }`}>
-                  {result.errors.length === 0 ? "✅ インポート完了" : "⚠️ 一部エラーあり"}
+                  {errorCount === 0 && duplicateCount === 0
+                    ? "✅ インポート完了"
+                    : errorCount === 0
+                    ? "⚠️ スキップあり（重複）"
+                    : "❌ エラーあり"}
                 </p>
-                <div className="flex gap-6 mt-2 text-sm text-gray-600">
-                  <span>登録: <strong className="text-green-700">{result.imported} 件</strong></span>
-                  <span>エラー: <strong className="text-red-700">{result.errors.length} 件</strong></span>
+                <div className="grid grid-cols-3 gap-3 text-sm">
+                  <div className="text-center rounded-lg bg-green-100 py-2">
+                    <p className="text-2xl font-bold text-green-700">{result.imported}</p>
+                    <p className="text-xs text-green-600 mt-0.5">✅ 登録成功</p>
+                  </div>
+                  <div className="text-center rounded-lg bg-yellow-100 py-2">
+                    <p className="text-2xl font-bold text-yellow-700">{duplicateCount}</p>
+                    <p className="text-xs text-yellow-600 mt-0.5">⚠️ 重複スキップ</p>
+                  </div>
+                  <div className="text-center rounded-lg bg-red-100 py-2">
+                    <p className="text-2xl font-bold text-red-700">{errorCount}</p>
+                    <p className="text-xs text-red-600 mt-0.5">❌ エラー</p>
+                  </div>
                 </div>
               </div>
 
+              {/* エラー詳細 */}
               {result.errors.length > 0 && (
-                <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                  {result.errors.map((err, i) => (
-                    <div key={i} className="bg-red-50 border border-red-200 rounded px-3 py-2 text-xs">
-                      <span className="font-mono text-red-600 font-medium">{err.row}行目</span>
-                      {err.accountName && (
-                        <span className="text-gray-500 ml-2">{err.accountName}</span>
-                      )}
-                      <span className="text-red-700 ml-2">— {err.message}</span>
-                    </div>
-                  ))}
+                <div>
+                  <p className="text-xs font-medium text-gray-600 mb-1.5">失敗・スキップ一覧</p>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                    {result.errors.map((err, i) => {
+                      const isDuplicate = err.message.startsWith("重複:");
+                      return (
+                        <div
+                          key={i}
+                          className={`rounded px-3 py-2 text-xs border ${
+                            isDuplicate
+                              ? "bg-yellow-50 border-yellow-200"
+                              : "bg-red-50 border-red-200"
+                          }`}
+                        >
+                          <span className={`font-mono font-medium ${isDuplicate ? "text-yellow-700" : "text-red-600"}`}>
+                            {err.row}行目
+                          </span>
+                          {err.accountName && (
+                            <span className="text-gray-500 ml-2">{err.accountName}</span>
+                          )}
+                          <span className={`ml-2 ${isDuplicate ? "text-yellow-700" : "text-red-700"}`}>
+                            — {err.message}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
 

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { GROWTH_REASON_TAGS } from "@/types";
 import type { BenchmarkPost, MediaType } from "@/types";
-import { encodeTags, decodeTags } from "@/lib/benchmarkCsv";
+import { encodeTags, decodeTags, suggestTagsFromContent } from "@/lib/benchmarkCsv";
 
 interface Props {
   initial?: Partial<BenchmarkPost>;
@@ -12,82 +12,118 @@ interface Props {
 }
 
 const MEDIA_TYPE_OPTIONS: { value: MediaType; label: string; icon: string }[] = [
-  { value: "IMAGE", label: "画像",        icon: "🖼️" },
-  { value: "VIDEO", label: "動画",        icon: "🎬" },
-  { value: "MIXED", label: "画像+動画",   icon: "🔀" },
+  { value: "IMAGE", label: "画像",      icon: "🖼️" },
+  { value: "VIDEO", label: "動画",      icon: "🎬" },
+  { value: "MIXED", label: "画像+動画", icon: "🔀" },
 ];
+
+const PREDEFINED = GROWTH_REASON_TAGS as readonly string[];
 
 function toInputDate(isoStr: string | null | undefined): string {
   if (!isoStr) return "";
-  try {
-    return new Date(isoStr).toISOString().slice(0, 16);
-  } catch {
-    return "";
-  }
+  try { return new Date(isoStr).toISOString().slice(0, 16); } catch { return ""; }
 }
 
 export function BenchmarkForm({ initial, mode }: Props) {
   const router = useRouter();
 
-  const [accountName,      setAccountName]      = useState(initial?.accountName      ?? "");
-  const [postUrl,          setPostUrl]           = useState(initial?.postUrl          ?? "");
-  const [postedAt,         setPostedAt]          = useState(toInputDate(initial?.postedAt));
-  const [bodyText,         setBodyText]          = useState(initial?.bodyText         ?? "");
-  const [mediaType,        setMediaType]         = useState<MediaType>((initial?.mediaType as MediaType) ?? "IMAGE");
-  const [videoDuration,    setVideoDuration]     = useState(initial?.videoDuration    ?? "");
-  const [compositionNote,  setCompositionNote]   = useState(initial?.compositionNote  ?? "");
-  const [characterNote,    setCharacterNote]     = useState(initial?.characterNote    ?? "");
-  const [aiReductionNote,  setAiReductionNote]   = useState(initial?.aiReductionNote  ?? "");
-  const [likes,            setLikes]             = useState(String(initial?.likes    ?? ""));
-  const [reposts,          setReposts]           = useState(String(initial?.reposts  ?? ""));
-  const [replies,          setReplies]           = useState(String(initial?.replies  ?? ""));
-  const [views,            setViews]             = useState(String(initial?.views    ?? ""));
-  const [growthReasonNote, setGrowthReasonNote]  = useState(initial?.growthReasonNote ?? "");
-  const [selectedTags,     setSelectedTags]      = useState<string[]>(
-    decodeTags(initial?.growthReasonTags)
+  // ── 基本フィールド
+  const [postUrl,       setPostUrl]       = useState(initial?.postUrl       ?? "");
+  const [accountName,   setAccountName]   = useState(initial?.accountName   ?? "");
+  const [postedAt,      setPostedAt]      = useState(toInputDate(initial?.postedAt));
+  const [bodyText,      setBodyText]      = useState(initial?.bodyText      ?? "");
+  const [mediaType,     setMediaType]     = useState<MediaType>((initial?.mediaType as MediaType) ?? "IMAGE");
+  const [videoDuration, setVideoDuration] = useState(initial?.videoDuration ?? "");
+
+  // ── エンゲージメント（views・likes を上位に）
+  const [views,   setViews]   = useState(String(initial?.views   ?? ""));
+  const [likes,   setLikes]   = useState(String(initial?.likes   ?? ""));
+  const [reposts, setReposts] = useState(String(initial?.reposts ?? ""));
+  const [replies, setReplies] = useState(String(initial?.replies ?? ""));
+
+  // ── タグ（定義済み + カスタム）
+  const initDecoded    = decodeTags(initial?.growthReasonTags);
+  const [selectedTags,   setSelectedTags]   = useState<string[]>(initDecoded.filter((t) => PREDEFINED.includes(t)));
+  const [customTags,     setCustomTags]     = useState<string[]>(initDecoded.filter((t) => !PREDEFINED.includes(t)));
+  const [customTagInput, setCustomTagInput] = useState("");
+  const [suggestedTags,  setSuggestedTags]  = useState<string[]>([]);
+
+  // ── 分析メモ
+  const [growthReasonNote, setGrowthReasonNote] = useState(initial?.growthReasonNote ?? "");
+  const [applicationNote,  setApplicationNote]  = useState(initial?.applicationNote  ?? "");
+
+  // ── 制作観察メモ（折りたたみ）
+  const [showDetail,      setShowDetail]      = useState(
+    !!(initial?.compositionNote || initial?.characterNote || initial?.aiReductionNote)
   );
-  const [applicationNote,  setApplicationNote]   = useState(initial?.applicationNote  ?? "");
+  const [compositionNote, setCompositionNote] = useState(initial?.compositionNote ?? "");
+  const [characterNote,   setCharacterNote]   = useState(initial?.characterNote   ?? "");
+  const [aiReductionNote, setAiReductionNote] = useState(initial?.aiReductionNote ?? "");
 
   const [submitting, setSubmitting] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
 
-  const toggleTag = (tag: string) => {
-    setSelectedTags((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
-    );
+  const allSelectedTags = [...selectedTags, ...customTags];
+
+  // ── タグ操作
+  const toggleTag = (tag: string) =>
+    setSelectedTags((prev) => prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]);
+
+  const handleSuggestTags = () => {
+    const suggested = suggestTagsFromContent(bodyText, mediaType);
+    setSuggestedTags(suggested);
   };
 
-  const handleSubmit = async () => {
-    if (!accountName.trim()) {
-      setError("アカウント名は必須です");
-      return;
+  const applySuggestedTag = (tag: string) => {
+    if (PREDEFINED.includes(tag)) {
+      toggleTag(tag);
+    } else if (!customTags.includes(tag)) {
+      setCustomTags((prev) => [...prev, tag]);
+    } else {
+      setCustomTags((prev) => prev.filter((t) => t !== tag));
     }
+  };
+
+  const addCustomTag = () => {
+    const tag = customTagInput.trim();
+    if (!tag) return;
+    setCustomTagInput("");
+    if (PREDEFINED.includes(tag)) {
+      setSelectedTags((prev) => prev.includes(tag) ? prev : [...prev, tag]);
+    } else if (!customTags.includes(tag)) {
+      setCustomTags((prev) => [...prev, tag]);
+    }
+  };
+
+  // ── 送信
+  const handleSubmit = async () => {
+    if (!accountName.trim()) { setError("アカウント名は必須です"); return; }
     setSubmitting(true);
     setError(null);
 
     const payload = {
-      accountName:     accountName.trim(),
-      postUrl:         postUrl.trim()        || null,
-      postedAt:        postedAt ? new Date(postedAt).toISOString() : null,
-      bodyText:        bodyText.trim()       || null,
+      accountName:      accountName.trim(),
+      postUrl:          postUrl.trim()         || null,
+      postedAt:         postedAt ? new Date(postedAt).toISOString() : null,
+      bodyText:         bodyText.trim()        || null,
       mediaType,
-      videoDuration:   videoDuration.trim()  || null,
-      compositionNote: compositionNote.trim()  || null,
-      characterNote:   characterNote.trim()    || null,
-      aiReductionNote: aiReductionNote.trim()  || null,
-      likes:    Number(likes)   || 0,
-      reposts:  Number(reposts) || 0,
-      replies:  Number(replies) || 0,
-      views:    Number(views)   || 0,
+      videoDuration:    videoDuration.trim()   || null,
+      compositionNote:  compositionNote.trim() || null,
+      characterNote:    characterNote.trim()   || null,
+      aiReductionNote:  aiReductionNote.trim() || null,
+      likes:            Number(likes)    || 0,
+      reposts:          Number(reposts)  || 0,
+      replies:          Number(replies)  || 0,
+      views:            Number(views)    || 0,
       growthReasonNote: growthReasonNote.trim() || null,
-      growthReasonTags: encodeTags(selectedTags),
+      growthReasonTags: encodeTags(allSelectedTags),
       applicationNote:  applicationNote.trim()  || null,
     };
 
     try {
-      const url  = mode === "create" ? "/api/benchmark" : `/api/benchmark/${initial!.id}`;
+      const url    = mode === "create" ? "/api/benchmark" : `/api/benchmark/${initial!.id}`;
       const method = mode === "create" ? "POST" : "PATCH";
-      const res  = await fetch(url, {
+      const res    = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -105,7 +141,6 @@ export function BenchmarkForm({ initial, mode }: Props) {
     }
   };
 
-  // テキストエリアの共通スタイル
   const ta = "input min-h-[80px] resize-y text-sm";
 
   return (
@@ -116,25 +151,11 @@ export function BenchmarkForm({ initial, mode }: Props) {
         </div>
       )}
 
-      {/* ── 基本情報 ── */}
+      {/* ── 投稿情報 */}
       <section className="card space-y-4">
-        <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2">
-          基本情報
-        </h3>
+        <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2">投稿情報</h3>
 
-        <div>
-          <label className="label">
-            アカウント名 <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            className="input"
-            placeholder="例: @ai_hiyo_"
-            value={accountName}
-            onChange={(e) => setAccountName(e.target.value)}
-          />
-        </div>
-
+        {/* postUrl を最上部に */}
         <div>
           <label className="label">投稿URL</label>
           <input
@@ -144,9 +165,31 @@ export function BenchmarkForm({ initial, mode }: Props) {
             value={postUrl}
             onChange={(e) => setPostUrl(e.target.value)}
           />
+          {postUrl && (
+            <a
+              href={postUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-brand-600 hover:underline mt-1 inline-block"
+            >
+              投稿を開く →
+            </a>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label">
+              アカウント名 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              className="input"
+              placeholder="例: @ai_hiyo_"
+              value={accountName}
+              onChange={(e) => setAccountName(e.target.value)}
+            />
+          </div>
           <div>
             <label className="label">投稿日時</label>
             <input
@@ -156,24 +199,25 @@ export function BenchmarkForm({ initial, mode }: Props) {
               onChange={(e) => setPostedAt(e.target.value)}
             />
           </div>
-          <div>
-            <label className="label">メディア種別</label>
-            <div className="flex gap-2 mt-1">
-              {MEDIA_TYPE_OPTIONS.map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setMediaType(opt.value)}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                    mediaType === opt.value
-                      ? "bg-brand-600 text-white border-brand-600"
-                      : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
-                  }`}
-                >
-                  {opt.icon} {opt.label}
-                </button>
-              ))}
-            </div>
+        </div>
+
+        <div>
+          <label className="label">メディア種別</label>
+          <div className="flex gap-2 mt-1">
+            {MEDIA_TYPE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setMediaType(opt.value)}
+                className={`flex-1 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                  mediaType === opt.value
+                    ? "bg-brand-600 text-white border-brand-600"
+                    : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                {opt.icon} {opt.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -191,13 +235,14 @@ export function BenchmarkForm({ initial, mode }: Props) {
         )}
       </section>
 
-      {/* ── 投稿内容 ── */}
+      {/* ── キャプション + エンゲージメント */}
       <section className="card space-y-4">
         <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2">
-          投稿内容
+          投稿内容・エンゲージメント
         </h3>
+
         <div>
-          <label className="label">投稿本文</label>
+          <label className="label">キャプション（投稿本文）</label>
           <textarea
             className={ta}
             placeholder="参考アカウントの投稿テキストをそのまま貼り付け..."
@@ -205,60 +250,20 @@ export function BenchmarkForm({ initial, mode }: Props) {
             onChange={(e) => setBodyText(e.target.value)}
           />
         </div>
-      </section>
 
-      {/* ── 制作観察メモ ── */}
-      <section className="card space-y-4">
-        <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2">
-          制作観察メモ
-        </h3>
-        <div>
-          <label className="label">構図・カメラワーク</label>
-          <textarea
-            className={ta}
-            placeholder="例: 縦パン→顔アップ、3秒で切り替え..."
-            value={compositionNote}
-            onChange={(e) => setCompositionNote(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label">顔・表情・服装・背景</label>
-          <textarea
-            className={ta}
-            placeholder="例: ショートヘア・白ワンピ・青空背景・笑顔..."
-            value={characterNote}
-            onChange={(e) => setCharacterNote(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="label">AI感を減らす工夫</label>
-          <textarea
-            className={ta}
-            placeholder="例: 髪の毛の細かいハイライト、テクスチャの追加..."
-            value={aiReductionNote}
-            onChange={(e) => setAiReductionNote(e.target.value)}
-          />
-        </div>
-      </section>
-
-      {/* ── エンゲージメント数値 ── */}
-      <section className="card space-y-4">
-        <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2">
-          エンゲージメント数値
-        </h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {([
-            { key: "likes",   label: "❤️ いいね数",   setter: setLikes,   val: likes   },
-            { key: "reposts", label: "🔁 リポスト数", setter: setReposts, val: reposts },
-            { key: "replies", label: "💬 返信数",      setter: setReplies, val: replies },
-            { key: "views",   label: "👁 表示数",      setter: setViews,   val: views   },
-          ] as const).map(({ key, label, setter, val }) => (
+            { key: "views",   label: "👁 表示数",     setter: setViews,   val: views,   primary: true  },
+            { key: "likes",   label: "❤️ いいね数",  setter: setLikes,   val: likes,   primary: true  },
+            { key: "reposts", label: "🔁 リポスト数", setter: setReposts, val: reposts, primary: false },
+            { key: "replies", label: "💬 返信数",     setter: setReplies, val: replies, primary: false },
+          ] as const).map(({ key, label, setter, val, primary }) => (
             <div key={key}>
-              <label className="label text-xs">{label}</label>
+              <label className={`label text-xs ${primary ? "font-semibold" : ""}`}>{label}</label>
               <input
                 type="number"
                 min="0"
-                className="input"
+                className={`input ${primary ? "ring-1 ring-brand-200 focus:ring-brand-400" : ""}`}
                 value={val}
                 onChange={(e) => setter(e.target.value)}
               />
@@ -267,15 +272,53 @@ export function BenchmarkForm({ initial, mode }: Props) {
         </div>
       </section>
 
-      {/* ── 分析メモ ── */}
+      {/* ── タグ・分析 */}
       <section className="card space-y-4">
-        <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2">
-          分析メモ
-        </h3>
+        <h3 className="font-semibold text-gray-900 border-b border-gray-100 pb-2">タグ・分析</h3>
 
+        {/* タグ選択 + 自動提案 */}
         <div>
-          <label className="label">伸びた理由タグ（複数選択可）</label>
-          <div className="flex flex-wrap gap-2 mt-2">
+          <div className="flex items-center justify-between mb-2">
+            <label className="label mb-0">伸びた理由タグ（複数選択可）</label>
+            <button
+              type="button"
+              onClick={handleSuggestTags}
+              className="text-xs px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 transition-colors"
+            >
+              ✨ タグを自動提案
+            </button>
+          </div>
+
+          {/* 自動提案バナー */}
+          {suggestedTags.length > 0 && (
+            <div className="mb-3 p-3 rounded-lg bg-amber-50 border border-amber-200">
+              <p className="text-xs text-amber-700 font-medium mb-2">
+                💡 キャプション・メディア種別から提案（クリックで選択/解除）
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {suggestedTags.map((tag) => {
+                  const selected = allSelectedTags.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => applySuggestedTag(tag)}
+                      className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                        selected
+                          ? "bg-brand-600 text-white border-brand-600"
+                          : "bg-white text-amber-700 border-amber-300 hover:bg-amber-100"
+                      }`}
+                    >
+                      {selected ? "✓ " : ""}{tag}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 定義済みタグ */}
+          <div className="flex flex-wrap gap-2">
             {GROWTH_REASON_TAGS.map((tag) => (
               <button
                 key={tag}
@@ -291,10 +334,45 @@ export function BenchmarkForm({ initial, mode }: Props) {
               </button>
             ))}
           </div>
-          {selectedTags.length > 0 && (
-            <p className="text-xs text-brand-600 mt-1">
-              選択中: {selectedTags.join("、")}
-            </p>
+
+          {/* カスタムタグ表示 */}
+          {customTags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {customTags.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-sm bg-purple-100 text-purple-700 border border-purple-200"
+                >
+                  {tag}
+                  <button
+                    type="button"
+                    onClick={() => setCustomTags((prev) => prev.filter((t) => t !== tag))}
+                    className="text-purple-400 hover:text-purple-700 leading-none"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* カスタムタグ入力 */}
+          <div className="flex gap-2 mt-3">
+            <input
+              type="text"
+              className="input flex-1 text-sm"
+              placeholder="独自タグを追加（例: 夜投稿、冬コーデ）Enter で追加"
+              value={customTagInput}
+              onChange={(e) => setCustomTagInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustomTag(); } }}
+            />
+            <button type="button" onClick={addCustomTag} className="btn-secondary text-sm px-4">
+              追加
+            </button>
+          </div>
+
+          {allSelectedTags.length > 0 && (
+            <p className="text-xs text-brand-600 mt-2">選択中: {allSelectedTags.join("、")}</p>
           )}
         </div>
 
@@ -319,13 +397,56 @@ export function BenchmarkForm({ initial, mode }: Props) {
         </div>
       </section>
 
-      {/* ── 送信ボタン ── */}
-      <div className="flex gap-3">
+      {/* ── 制作観察メモ（折りたたみ） */}
+      <section className="card">
         <button
-          onClick={handleSubmit}
-          disabled={submitting}
-          className="btn-primary"
+          type="button"
+          onClick={() => setShowDetail((v) => !v)}
+          className="w-full flex items-center justify-between text-left"
         >
+          <h3 className="font-semibold text-gray-900">
+            制作観察メモ{" "}
+            <span className="text-xs font-normal text-gray-400 ml-1">（任意）</span>
+          </h3>
+          <span className="text-gray-400 text-sm">{showDetail ? "▲ 閉じる" : "▼ 開く"}</span>
+        </button>
+
+        {showDetail && (
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="label">構図・カメラワーク</label>
+              <textarea
+                className={ta}
+                placeholder="例: 縦パン→顔アップ、3秒で切り替え..."
+                value={compositionNote}
+                onChange={(e) => setCompositionNote(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label">顔・表情・服装・背景</label>
+              <textarea
+                className={ta}
+                placeholder="例: ショートヘア・白ワンピ・青空背景・笑顔..."
+                value={characterNote}
+                onChange={(e) => setCharacterNote(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label">AI感を減らす工夫</label>
+              <textarea
+                className={ta}
+                placeholder="例: 髪の毛の細かいハイライト、テクスチャの追加..."
+                value={aiReductionNote}
+                onChange={(e) => setAiReductionNote(e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── 送信 */}
+      <div className="flex gap-3">
+        <button onClick={handleSubmit} disabled={submitting} className="btn-primary">
           {submitting ? "保存中..." : mode === "create" ? "登録する" : "更新する"}
         </button>
         <button onClick={() => router.back()} className="btn-secondary">

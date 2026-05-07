@@ -311,6 +311,43 @@ export interface RecommendedTag {
   tag: string;
   frequency: number;
   avgViews: number;
+  vsOverallViews?: number;  // 全体平均再生数との比率 (1.8 = 80%高い)
+  top30pctRate?: number;    // 上位30%投稿への出現率 0–1
+  reason?: string;          // 推薦理由テキスト
+}
+
+// ─── ベンチマーク深層分析 ────────────────────────────────────────────────────────
+
+export interface BenchmarkTagInsight {
+  tag: string;
+  count: number;
+  avgViews: number;
+  avgLikes: number;
+  avgEngagementRate: number;
+  top30pctRate: number;    // 上位30%投稿への出現率 0–1
+  vsOverallViews: number;  // 全体平均再生数比率 (1.2 = 20%高い)
+  vsOverallER: number;     // 全体平均ER比率
+}
+
+export interface BenchmarkTagCombo {
+  tagA: string;
+  tagB: string;
+  count: number;
+  avgViews: number;
+  avgLikes: number;
+  avgEngagementRate: number;
+  vsIndividualAvg: number; // 単タグ平均viewsの単純平均との比率
+}
+
+export interface BenchmarkInsightsData {
+  totalPosts: number;
+  overallAvgViews: number;
+  overallAvgEngagementRate: number;
+  top30pctThreshold: number;
+  winnerTags: BenchmarkTagInsight[];
+  loserTags: BenchmarkTagInsight[];
+  tagCombos: BenchmarkTagCombo[];
+  allTagStats: BenchmarkTagInsight[];
 }
 
 export interface BenchmarkRecommendationData {

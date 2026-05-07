@@ -5,6 +5,7 @@ import Link from "next/link";
 import { format } from "date-fns";
 import { useToast } from "@/components/Toast";
 import type { PostQueueWithContent, QueueStatus } from "@/types";
+import type { AutoPostResult } from "@/lib/autoPost";
 
 // ─── 定数 ─────────────────────────────────────────────────────────────────────
 
@@ -66,15 +67,27 @@ function QueueStatusBadge({ status }: { status: string }) {
   );
 }
 
+// ─── 型 ─────────────────────────────────────────────────────────────────────
+
+type AutoPostStatus = { due: number; upcoming: number; nextScheduledAt: string | null };
+type ConfirmAction  = { id: string; action: "post" | "cancel" | "delete" };
+type PostingMode    = { mode: "real" | "dummy"; enabled: boolean; configured: boolean; missingVars: string[] };
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function QueuePage() {
   const { toast } = useToast();
-  const [items,        setItems]        = useState<PostQueueWithContent[]>([]);
-  const [filterStatus, setFilterStatus] = useState("");
-  const [loading,      setLoading]      = useState(true);
-  const [posting,      setPosting]      = useState<string | null>(null);
-  const [confirmAction, setConfirmAction] = useState<{ id: string; action: "post" | "cancel" | "delete" } | null>(null);
+  const [items,         setItems]         = useState<PostQueueWithContent[]>([]);
+  const [filterStatus,  setFilterStatus]  = useState("");
+  const [loading,       setLoading]       = useState(true);
+  const [posting,       setPosting]       = useState<string | null>(null);
+  const [retrying,      setRetrying]      = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
+  const [autoRunning,   setAutoRunning]   = useState(false);
+  const [autoStatus,    setAutoStatus]    = useState<AutoPostStatus | null>(null);
+  const [postingMode,   setPostingMode]   = useState<PostingMode | null>(null);
+
+  // ── データ取得 ────────────────────────────────────────────────────────────
 
   const fetchItems = useCallback(async () => {
     setLoading(true);
@@ -93,9 +106,64 @@ export default function QueuePage() {
     }
   }, [filterStatus, toast]);
 
-  useEffect(() => { fetchItems(); }, [fetchItems]);
+  const fetchAutoStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/queue/auto-post");
+      if (!res.ok) return;
+      const data = await res.json();
+      setAutoStatus(data);
+    } catch { /* サイレント失敗 */ }
+  }, []);
+
+  const fetchPostingMode = useCallback(async () => {
+    try {
+      const res = await fetch("/api/queue/posting-mode");
+      if (!res.ok) return;
+      const data = await res.json();
+      setPostingMode(data);
+    } catch { /* サイレント失敗 */ }
+  }, []);
+
+  useEffect(() => {
+    fetchItems();
+    fetchAutoStatus();
+    fetchPostingMode();
+  }, [fetchItems, fetchAutoStatus, fetchPostingMode]);
 
   const queuedCount = items.filter((i) => i.status === "queued").length;
+  const failedCount = items.filter((i) => i.status === "failed").length;
+
+  // ── 自動投稿: 手動実行 ───────────────────────────────────────────────────
+
+  const handleRunAutoPost = async () => {
+    setAutoRunning(true);
+    try {
+      const res = await fetch("/api/queue/auto-post", { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data: AutoPostResult & { ok: boolean; message?: string } = await res.json();
+
+      if (!data.ok) {
+        toast(data.message ?? "自動投稿に失敗しました", "error");
+        return;
+      }
+      if (data.processed === 0) {
+        toast("現在、投稿対象のキューがありません", "info");
+      } else {
+        toast(
+          `自動投稿完了: 成功 ${data.succeeded}件 / 失敗 ${data.failed}件`,
+          data.failed > 0 ? "error" : "success"
+        );
+      }
+      await fetchItems();
+      await fetchAutoStatus();
+    } catch {
+      toast("自動投稿の実行に失敗しました", "error");
+    } finally {
+      setAutoRunning(false);
+    }
+  };
+
+  // ── 個別操作 ─────────────────────────────────────────────────────────────
 
   const handlePost = async (id: string) => {
     setConfirmAction(null);
@@ -109,6 +177,7 @@ export default function QueuePage() {
       }
       toast("投稿済みに変更しました", "success");
       fetchItems();
+      fetchAutoStatus();
     } catch {
       toast("投稿処理に失敗しました", "error");
     } finally {
@@ -127,6 +196,7 @@ export default function QueuePage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       toast("キャンセルしました", "info");
       fetchItems();
+      fetchAutoStatus();
     } catch {
       toast("キャンセルに失敗しました", "error");
     }
@@ -139,8 +209,28 @@ export default function QueuePage() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       toast("削除しました", "success");
       fetchItems();
+      fetchAutoStatus();
     } catch {
       toast("削除に失敗しました", "error");
+    }
+  };
+
+  const handleRetry = async (id: string) => {
+    setRetrying(id);
+    try {
+      const res = await fetch(`/api/queue/${id}/retry`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json();
+        toast(data.error ?? "再試行の設定に失敗しました", "error");
+        return;
+      }
+      toast("再試行キューに追加しました。自動投稿で処理されます。", "success");
+      fetchItems();
+      fetchAutoStatus();
+    } catch {
+      toast("再試行の設定に失敗しました", "error");
+    } finally {
+      setRetrying(null);
     }
   };
 
@@ -150,7 +240,8 @@ export default function QueuePage() {
     if (action === "delete") handleDelete(id);
   };
 
-  // インライン確認ボタン
+  // ── インライン確認ボタン ─────────────────────────────────────────────────
+
   function InlineConfirm({
     id, action, label, btnClass,
   }: {
@@ -187,25 +278,90 @@ export default function QueuePage() {
     );
   }
 
+  // ── レンダー ─────────────────────────────────────────────────────────────
+
   return (
-    <div className="max-w-5xl space-y-6">
+    <div className="max-w-5xl space-y-5">
+
       {/* ヘッダー */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-2xl font-bold">投稿キュー</h2>
           <p className="text-sm text-gray-500 mt-0.5">生成コンテンツの SNS 投稿管理</p>
         </div>
         <div className="flex gap-3 items-center flex-wrap">
+          {/* 投稿モードバッジ */}
+          {postingMode && (
+            <span
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border ${
+                postingMode.mode === "real"
+                  ? "bg-green-50 text-green-700 border-green-200"
+                  : "bg-gray-100 text-gray-500 border-gray-200"
+              }`}
+              title={
+                postingMode.mode === "real"
+                  ? "X API v2 で実際に投稿されます"
+                  : postingMode.enabled && !postingMode.configured
+                  ? `環境変数が未設定: ${postingMode.missingVars.join(", ")}`
+                  : "ログ出力のみ（SNS には送信されません）"
+              }
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${postingMode.mode === "real" ? "bg-green-500" : "bg-gray-400"}`} />
+              {postingMode.mode === "real" ? "本番投稿モード" : "ダミー投稿モード"}
+            </span>
+          )}
           {queuedCount > 0 && (
             <span className="flex items-center gap-1.5 text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-1.5">
               <span className="font-semibold">{queuedCount}</span> 件待機中
             </span>
           )}
+          {failedCount > 0 && (
+            <span className="flex items-center gap-1.5 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-1.5">
+              <span className="font-semibold">{failedCount}</span> 件失敗
+            </span>
+          )}
+          <button
+            onClick={handleRunAutoPost}
+            disabled={autoRunning}
+            className="btn-primary text-sm disabled:opacity-60"
+          >
+            {autoRunning ? "実行中..." : "▶ 自動投稿実行"}
+          </button>
           <Link href="/content" className="btn-secondary text-sm">
             コンテンツ一覧
           </Link>
         </div>
       </div>
+
+      {/* 自動投稿ステータスバナー */}
+      {autoStatus !== null && (autoStatus.due > 0 || autoStatus.upcoming > 0) && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-5 py-3 flex items-center justify-between gap-4 flex-wrap text-sm">
+          <div className="flex items-center gap-4 flex-wrap">
+            {autoStatus.due > 0 && (
+              <span className="text-blue-700 font-medium">
+                ⏰ {autoStatus.due}件 — 自動投稿待ち（期限到来）
+              </span>
+            )}
+            {autoStatus.upcoming > 0 && (
+              <span className="text-blue-600">
+                📅 {autoStatus.upcoming}件 — 予約済み
+              </span>
+            )}
+            {autoStatus.nextScheduledAt && (
+              <span className="text-blue-500">
+                次回: {format(new Date(autoStatus.nextScheduledAt), "M/d HH:mm")}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={handleRunAutoPost}
+            disabled={autoRunning || autoStatus.due === 0}
+            className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 transition-colors whitespace-nowrap"
+          >
+            {autoRunning ? "実行中..." : "今すぐ実行"}
+          </button>
+        </div>
+      )}
 
       {/* フィルター */}
       <div className="flex gap-2 flex-wrap">
@@ -258,6 +414,8 @@ export default function QueuePage() {
               <tbody className="divide-y divide-gray-50">
                 {items.map((item) => (
                   <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+
+                    {/* コンテンツ */}
                     <td className="px-5 py-4 max-w-xs">
                       <p className="font-medium text-gray-900 truncate">
                         {item.generatedContent.title ?? (
@@ -270,28 +428,40 @@ export default function QueuePage() {
                         </p>
                       )}
                       {item.errorMessage && (
-                        <p className="text-red-500 text-xs mt-0.5 truncate">
+                        <p className="text-red-500 text-xs mt-0.5 truncate" title={item.errorMessage}>
                           ⚠ {item.errorMessage}
+                        </p>
+                      )}
+                      {/* 外部投稿ID */}
+                      {(item as PostQueueWithContent & { externalPostId?: string | null }).externalPostId && (
+                        <p className="text-gray-400 text-xs mt-0.5 truncate font-mono">
+                          ID: {(item as PostQueueWithContent & { externalPostId?: string | null }).externalPostId}
                         </p>
                       )}
                     </td>
 
+                    {/* PF */}
                     <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
                       {PLATFORM_LABELS[item.platform] ?? item.platform}
                     </td>
 
+                    {/* 予定日時 */}
                     <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
                       {item.scheduledAt
                         ? format(new Date(item.scheduledAt), "M/d HH:mm")
                         : <span className="text-gray-300">—</span>}
                     </td>
 
+                    {/* ステータス */}
                     <td className="px-4 py-4">
                       <QueueStatusBadge status={item.status} />
                     </td>
 
+                    {/* 操作 */}
                     <td className="px-4 py-4">
                       <div className="flex gap-2 justify-end items-center flex-wrap">
+
+                        {/* 待機中: 手動投稿 / キャンセル */}
                         {item.status === "queued" && (
                           <>
                             <InlineConfirm
@@ -309,7 +479,27 @@ export default function QueuePage() {
                           </>
                         )}
 
-                        {(item.status === "cancelled" || item.status === "failed") && (
+                        {/* 失敗: 再試行 / 削除 */}
+                        {item.status === "failed" && (
+                          <>
+                            <button
+                              onClick={() => handleRetry(item.id)}
+                              disabled={retrying === item.id}
+                              className="text-xs px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50 transition-colors whitespace-nowrap"
+                            >
+                              {retrying === item.id ? "設定中..." : "↩ 再試行"}
+                            </button>
+                            <InlineConfirm
+                              id={item.id}
+                              action="delete"
+                              label="削除"
+                              btnClass="text-xs text-red-400 hover:text-red-600 transition-colors"
+                            />
+                          </>
+                        )}
+
+                        {/* キャンセル済み: 削除のみ */}
+                        {item.status === "cancelled" && (
                           <InlineConfirm
                             id={item.id}
                             action="delete"
@@ -318,6 +508,7 @@ export default function QueuePage() {
                           />
                         )}
 
+                        {/* 投稿済み: 実績入力リンク */}
                         {item.status === "posted" && (
                           <div className="flex gap-2 items-center flex-wrap justify-end">
                             <Link
@@ -340,8 +531,11 @@ export default function QueuePage() {
               </tbody>
             </table>
           </div>
-          <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-400">
-            {items.length} 件
+          <div className="px-5 py-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-400 flex items-center justify-between">
+            <span>{items.length} 件</span>
+            <span className="text-gray-300">
+              自動投稿: vercel.json cron / ローカル: node scripts/auto-poster.mjs
+            </span>
           </div>
         </div>
       )}

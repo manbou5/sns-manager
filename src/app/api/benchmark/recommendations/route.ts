@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { decodeTags } from "@/lib/benchmarkCsv";
+import { computeInsights, buildReasonText } from "@/lib/benchmarkInsights";
 import type { BenchmarkRecommendationData, MediaType } from "@/types";
 
 const MEDIA_LABELS: Record<string, string> = {
@@ -11,10 +12,7 @@ const MEDIA_LABELS: Record<string, string> = {
 
 // ─── ユーティリティ ────────────────────────────────────────────────────────────
 
-function dedupeNotes(
-  notes: (string | null | undefined)[],
-  limit = 5
-): string[] {
+function dedupeNotes(notes: (string | null | undefined)[], limit = 5): string[] {
   return Array.from(
     new Set(
       notes
@@ -25,21 +23,12 @@ function dedupeNotes(
 }
 
 function buildAiPrompt({
-  mediaLabel,
-  duration,
-  topTags,
-  expressionExample,
-  compositionExample,
-  backgroundExample,
-  applicationExample,
+  mediaLabel, duration, topTags, expressionExample, compositionExample,
+  backgroundExample, applicationExample,
 }: {
-  mediaLabel: string;
-  duration?: string;
-  topTags: string[];
-  expressionExample?: string;
-  compositionExample?: string;
-  backgroundExample?: string;
-  applicationExample?: string;
+  mediaLabel: string; duration?: string; topTags: string[];
+  expressionExample?: string; compositionExample?: string;
+  backgroundExample?: string; applicationExample?: string;
 }): string {
   const lines: string[] = ["# AIキャラクター投稿 生成プロンプト案", ""];
 
@@ -47,32 +36,26 @@ function buildAiPrompt({
     lines.push("## キャラクター・表情");
     lines.push(expressionExample, "");
   }
-
   if (compositionExample || backgroundExample) {
     lines.push("## 構図・背景");
     if (compositionExample) lines.push(`構図: ${compositionExample}`);
-    if (backgroundExample) lines.push(`背景: ${backgroundExample}`);
+    if (backgroundExample)  lines.push(`背景: ${backgroundExample}`);
     lines.push("");
   }
-
   lines.push("## メディア形式");
   lines.push(duration ? `${mediaLabel}（${duration}）` : mediaLabel, "");
-
   if (topTags.length > 0) {
     lines.push("## 重視する表現要素");
     lines.push(topTags.join("・"), "");
   }
-
   if (applicationExample) {
     lines.push("## 参考メモ（高パフォーマンス投稿より）");
     lines.push(applicationExample, "");
   }
-
   lines.push("---");
   lines.push(
     "上記の設定をもとに、SNS映えする高エンゲージメントなAIキャラクター投稿用コンテンツを生成してください。"
   );
-
   return lines.join("\n");
 }
 
@@ -81,13 +64,16 @@ function buildAiPrompt({
 export async function GET() {
   const posts = await prisma.benchmarkPost.findMany({
     select: {
-      views: true,
-      mediaType: true,
-      videoDuration: true,
+      views:           true,
+      mediaType:       true,
+      videoDuration:   true,
       growthReasonTags: true,
       compositionNote: true,
-      characterNote: true,
+      characterNote:   true,
       applicationNote: true,
+      likes:           true,
+      reposts:         true,
+      replies:         true,
     },
   });
 
@@ -115,13 +101,17 @@ export async function GET() {
 
   if (posts.length === 0) return NextResponse.json(empty);
 
-  // ── 上位20%を高パフォーマンス投稿として抽出 ──────────────────────────────────
-  const sorted = [...posts].sort((a, b) => b.views - a.views);
-  const top20pctCount = Math.max(1, Math.ceil(posts.length * 0.2));
-  const highPerfPosts = sorted.slice(0, top20pctCount);
+  // ── 全体インサイト（推薦理由の根拠）
+  const insights = computeInsights(posts);
+  const tagInsightMap = new Map(insights.allTagStats.map((t) => [t.tag, t]));
+
+  // ── 上位20%を高パフォーマンス投稿として抽出
+  const sorted         = [...posts].sort((a, b) => b.views - a.views);
+  const top20pctCount  = Math.max(1, Math.ceil(posts.length * 0.2));
+  const highPerfPosts  = sorted.slice(0, top20pctCount);
   const viewsThreshold = highPerfPosts[highPerfPosts.length - 1]?.views ?? 0;
 
-  // ── タグ頻度集計 ──────────────────────────────────────────────────────────────
+  // ── タグ頻度集計
   type FreqEntry = { freq: number; totalViews: number };
   const tagFreqMap = new Map<string, FreqEntry>();
 
@@ -130,85 +120,83 @@ export async function GET() {
     for (const tag of tags) {
       const prev = tagFreqMap.get(tag) ?? { freq: 0, totalViews: 0 };
       tagFreqMap.set(tag, {
-        freq: prev.freq + 1,
+        freq:       prev.freq + 1,
         totalViews: prev.totalViews + post.views,
       });
     }
   }
 
   const recommendedTags = Array.from(tagFreqMap.entries())
-    .map(([tag, { freq, totalViews }]) => ({
-      tag,
-      frequency: freq,
-      avgViews: Math.round(totalViews / freq),
-    }))
+    .map(([tag, { freq, totalViews }]) => {
+      const avgViews    = Math.round(totalViews / freq);
+      const insight     = tagInsightMap.get(tag);
+      const vsOverall   = insight?.vsOverallViews;
+      const top30Rate   = insight?.top30pctRate;
+      const reason      = buildReasonText(tag, freq, top20pctCount, vsOverall, top30Rate);
+      return {
+        tag,
+        frequency:      freq,
+        avgViews,
+        vsOverallViews: vsOverall,
+        top30pctRate:   top30Rate,
+        reason,
+      };
+    })
     .sort((a, b) => b.frequency - a.frequency || b.avgViews - a.avgViews)
     .slice(0, 5);
 
-  // ── メディア種別頻度集計 ────────────────────────────────────────────────────
+  // ── メディア種別頻度集計
   const mediaMap = new Map<string, FreqEntry>();
   for (const post of highPerfPosts) {
     const prev = mediaMap.get(post.mediaType) ?? { freq: 0, totalViews: 0 };
     mediaMap.set(post.mediaType, {
-      freq: prev.freq + 1,
+      freq:       prev.freq + 1,
       totalViews: prev.totalViews + post.views,
     });
   }
-  const topMedia = Array.from(mediaMap.entries()).sort(
-    (a, b) => b[1].freq - a[1].freq
-  )[0];
+  const topMedia = Array.from(mediaMap.entries()).sort((a, b) => b[1].freq - a[1].freq)[0];
   const recommendedMediaType = topMedia
     ? {
         mediaType: topMedia[0] as MediaType,
-        label: MEDIA_LABELS[topMedia[0]] ?? topMedia[0],
+        label:     MEDIA_LABELS[topMedia[0]] ?? topMedia[0],
         frequency: topMedia[1].freq,
-        avgViews: Math.round(topMedia[1].totalViews / topMedia[1].freq),
+        avgViews:  Math.round(topMedia[1].totalViews / topMedia[1].freq),
       }
     : null;
 
-  // ── 動画尺頻度集計 ───────────────────────────────────────────────────────────
+  // ── 動画尺頻度集計
   const durMap = new Map<string, FreqEntry>();
   for (const post of highPerfPosts) {
     if (!post.videoDuration?.trim()) continue;
-    const key = post.videoDuration.trim();
+    const key  = post.videoDuration.trim();
     const prev = durMap.get(key) ?? { freq: 0, totalViews: 0 };
-    durMap.set(key, {
-      freq: prev.freq + 1,
-      totalViews: prev.totalViews + post.views,
-    });
+    durMap.set(key, { freq: prev.freq + 1, totalViews: prev.totalViews + post.views });
   }
-  const topDur = Array.from(durMap.entries()).sort(
-    (a, b) => b[1].freq - a[1].freq
-  )[0];
+  const topDur = Array.from(durMap.entries()).sort((a, b) => b[1].freq - a[1].freq)[0];
   const recommendedDuration = topDur
     ? {
         videoDuration: topDur[0],
-        frequency: topDur[1].freq,
-        avgViews: Math.round(topDur[1].totalViews / topDur[1].freq),
+        frequency:     topDur[1].freq,
+        avgViews:      Math.round(topDur[1].totalViews / topDur[1].freq),
       }
     : null;
 
-  // ── ノート例を抽出（タグ別優先） ─────────────────────────────────────────────
+  // ── ノート例
   const withTag = (tag: string) =>
     highPerfPosts.filter((p) => decodeTags(p.growthReasonTags).includes(tag));
 
-  const compositionSrc = withTag("構図");
+  const compositionSrc     = withTag("構図");
   const compositionExamples = dedupeNotes(
-    (compositionSrc.length > 0 ? compositionSrc : highPerfPosts).map(
-      (p) => p.compositionNote
-    )
+    (compositionSrc.length > 0 ? compositionSrc : highPerfPosts).map((p) => p.compositionNote)
   );
 
-  const expressionSrc = withTag("表情");
-  const expressionExamples = dedupeNotes(
-    (expressionSrc.length > 0 ? expressionSrc : highPerfPosts).map(
-      (p) => p.characterNote
-    )
+  const expressionSrc      = withTag("表情");
+  const expressionExamples  = dedupeNotes(
+    (expressionSrc.length > 0 ? expressionSrc : highPerfPosts).map((p) => p.characterNote)
   );
 
-  // 背景は専用フィールドなし → 背景タグ付き投稿の compositionNote のみ（fallback なし）
-  const backgroundSrc = withTag("背景");
-  const backgroundExamples = dedupeNotes(
+  const backgroundSrc      = withTag("背景");
+  const backgroundExamples  = dedupeNotes(
     backgroundSrc.map((p) => p.compositionNote)
   );
 
@@ -216,21 +204,20 @@ export async function GET() {
     highPerfPosts.map((p) => p.applicationNote)
   );
 
-  // ── 投稿案タイトル生成 ───────────────────────────────────────────────────────
-  const topTagName = recommendedTags[0]?.tag ?? "";
-  const mediaLabel = recommendedMediaType?.label ?? "投稿";
+  // ── 投稿案タイトル・AIプロンプト
+  const topTagName          = recommendedTags[0]?.tag ?? "";
+  const mediaLabel          = recommendedMediaType?.label ?? "投稿";
   const postTitleSuggestion = topTagName
     ? `【${mediaLabel}】${topTagName}を軸にしたキャラクター投稿`
     : `【${mediaLabel}】高エンゲージメントを狙ったキャラクター投稿`;
 
-  // ── AI プロンプト生成 ────────────────────────────────────────────────────────
   const aiPromptSuggestion = buildAiPrompt({
     mediaLabel,
-    duration: recommendedDuration?.videoDuration,
-    topTags: recommendedTags.slice(0, 3).map((t) => t.tag),
-    expressionExample: expressionExamples[0],
+    duration:           recommendedDuration?.videoDuration,
+    topTags:            recommendedTags.slice(0, 3).map((t) => t.tag),
+    expressionExample:  expressionExamples[0],
     compositionExample: compositionExamples[0],
-    backgroundExample: backgroundExamples[0],
+    backgroundExample:  backgroundExamples[0],
     applicationExample: applicationExamples[0],
   });
 
