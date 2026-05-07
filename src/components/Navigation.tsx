@@ -22,6 +22,7 @@ const NAV_GROUPS = [
       { href: "/benchmark",                  label: "ベンチマーク",   icon: "🔍" },
       { href: "/benchmark/analytics",        label: "集計",           icon: "📈" },
       { href: "/benchmark/recommendations",  label: "投稿案推薦",     icon: "💡" },
+      { href: "/benchmark/bulk-analyze",     label: "一括解析CSV",    icon: "📦" },
     ],
   },
   {

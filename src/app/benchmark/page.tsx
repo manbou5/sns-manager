@@ -170,9 +170,14 @@ export default function BenchmarkPage() {
             参考アカウントの投稿データを蓄積・分析
           </p>
         </div>
-        <Link href="/benchmark/new" className="btn-primary">
-          + 新規登録
-        </Link>
+        <div className="flex gap-2 items-center flex-wrap">
+          <Link href="/benchmark/bulk-analyze" className="btn-secondary text-sm flex items-center gap-1.5">
+            📦 一括解析CSV
+          </Link>
+          <Link href="/benchmark/new" className="btn-primary">
+            + 新規登録
+          </Link>
+        </div>
       </div>
 
       {/* タグ集計バー */}
