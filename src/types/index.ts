@@ -229,6 +229,7 @@ export interface BenchmarkPost {
   videoDuration?: string | null;
   compositionNote?: string | null;
   characterNote?: string | null;
+  backgroundNote?: string | null;
   aiReductionNote?: string | null;
   likes: number;
   reposts: number;
@@ -378,4 +379,20 @@ export interface BenchmarkRecommendationData {
   aiPromptSuggestion: string;
   // 不足フィールドに関する通知
   fieldNotices: string[];
+}
+
+// ─── AI Vision タグ付け ───────────────────────────────────────────────────────
+
+export interface VisionTagResult {
+  growthReasonMemo: string;
+  compositionNote:  string;
+  characterNote:    string;
+  backgroundNote:   string;
+}
+
+export interface VisionTagBatchItem {
+  index:    number;
+  filename: string;
+  result:   VisionTagResult | null;
+  error:    string | null;
 }

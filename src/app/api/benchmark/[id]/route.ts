@@ -35,7 +35,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     const {
       accountName, postUrl, postedAt, bodyText,
       mediaType, videoDuration, compositionNote,
-      characterNote, aiReductionNote,
+      characterNote, backgroundNote, aiReductionNote,
       likes, reposts, replies, views,
       growthReasonNote, growthReasonTags, applicationNote,
     } = body;
@@ -57,7 +57,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         ...(mediaType       !== undefined ? { mediaType                                 } : {}),
         ...(videoDuration   !== undefined ? { videoDuration:   videoDuration?.trim() || null } : {}),
         ...(compositionNote !== undefined ? { compositionNote: compositionNote?.trim() || null } : {}),
-        ...(characterNote   !== undefined ? { characterNote:   characterNote?.trim() || null   } : {}),
+        ...(characterNote   !== undefined ? { characterNote:   characterNote?.trim()   || null } : {}),
+        ...(backgroundNote  !== undefined ? { backgroundNote:  backgroundNote?.trim()  || null } : {}),
         ...(aiReductionNote !== undefined ? { aiReductionNote: aiReductionNote?.trim() || null } : {}),
         ...(likes    !== undefined ? { likes:    Number(likes)    || 0 } : {}),
         ...(reposts  !== undefined ? { reposts:  Number(reposts)  || 0 } : {}),

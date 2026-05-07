@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error: "必須カラムが不足しています",
-        hint: "accountName, postUrl, postedAt, bodyText, mediaType, videoDuration, compositionNote, characterNote, aiReductionNote, likes, reposts, replies, views, growthReasonNote, growthReasonTags, applicationNote",
+        hint: "accountName, postUrl, postedAt, bodyText, mediaType, videoDuration, compositionNote, characterNote, backgroundNote, aiReductionNote, likes, reposts, replies, views, growthReasonNote, growthReasonTags, applicationNote",
       },
       { status: 400 }
     );

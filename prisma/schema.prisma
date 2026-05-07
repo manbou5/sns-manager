@@ -61,6 +61,7 @@ model BenchmarkPost {
   // 制作観察メモ
   compositionNote  String?
   characterNote    String?
+  backgroundNote   String?
   aiReductionNote  String?
 
   // エンゲージメント

@@ -3,8 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { GROWTH_REASON_TAGS } from "@/types";
-import type { BenchmarkPost, MediaType } from "@/types";
+import type { BenchmarkPost, MediaType, VisionTagResult } from "@/types";
 import { encodeTags, decodeTags, suggestTagsFromContent } from "@/lib/benchmarkCsv";
+import dynamic from "next/dynamic";
+
+const BenchmarkVisionTagger = dynamic(
+  () => import("@/components/BenchmarkVisionTagger"),
+  { ssr: false }
+);
 
 interface Props {
   initial?: Partial<BenchmarkPost>;
@@ -54,12 +60,14 @@ export function BenchmarkForm({ initial, mode }: Props) {
 
   // ── 制作観察メモ（折りたたみ）
   const [showDetail,      setShowDetail]      = useState(
-    !!(initial?.compositionNote || initial?.characterNote || initial?.aiReductionNote)
+    !!(initial?.compositionNote || initial?.characterNote || initial?.backgroundNote || initial?.aiReductionNote)
   );
   const [compositionNote, setCompositionNote] = useState(initial?.compositionNote ?? "");
   const [characterNote,   setCharacterNote]   = useState(initial?.characterNote   ?? "");
+  const [backgroundNote,  setBackgroundNote]  = useState(initial?.backgroundNote  ?? "");
   const [aiReductionNote, setAiReductionNote] = useState(initial?.aiReductionNote ?? "");
 
+  const [showVisionTagger, setShowVisionTagger] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error,      setError]      = useState<string | null>(null);
 
@@ -108,9 +116,10 @@ export function BenchmarkForm({ initial, mode }: Props) {
       bodyText:         bodyText.trim()        || null,
       mediaType,
       videoDuration:    videoDuration.trim()   || null,
-      compositionNote:  compositionNote.trim() || null,
-      characterNote:    characterNote.trim()   || null,
-      aiReductionNote:  aiReductionNote.trim() || null,
+      compositionNote:  compositionNote.trim()  || null,
+      characterNote:    characterNote.trim()    || null,
+      backgroundNote:   backgroundNote.trim()   || null,
+      aiReductionNote:  aiReductionNote.trim()  || null,
       likes:            Number(likes)    || 0,
       reposts:          Number(reposts)  || 0,
       replies:          Number(replies)  || 0,
@@ -141,10 +150,25 @@ export function BenchmarkForm({ initial, mode }: Props) {
     }
   };
 
+  const handleVisionApply = (result: VisionTagResult) => {
+    if (result.growthReasonMemo) setGrowthReasonNote(result.growthReasonMemo);
+    if (result.compositionNote)  setCompositionNote(result.compositionNote);
+    if (result.characterNote)    setCharacterNote(result.characterNote);
+    if (result.backgroundNote)   setBackgroundNote(result.backgroundNote);
+    setShowDetail(true);
+  };
+
   const ta = "input min-h-[80px] resize-y text-sm";
 
   return (
     <div className="max-w-2xl space-y-6">
+      {showVisionTagger && (
+        <BenchmarkVisionTagger
+          onClose={() => setShowVisionTagger(false)}
+          onApply={handleVisionApply}
+          benchmarkPostId={mode === "edit" ? initial?.id : undefined}
+        />
+      )}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
           {error}
@@ -399,17 +423,27 @@ export function BenchmarkForm({ initial, mode }: Props) {
 
       {/* ── 制作観察メモ（折りたたみ） */}
       <section className="card">
-        <button
-          type="button"
-          onClick={() => setShowDetail((v) => !v)}
-          className="w-full flex items-center justify-between text-left"
-        >
-          <h3 className="font-semibold text-gray-900">
-            制作観察メモ{" "}
-            <span className="text-xs font-normal text-gray-400 ml-1">（任意）</span>
-          </h3>
-          <span className="text-gray-400 text-sm">{showDetail ? "▲ 閉じる" : "▼ 開く"}</span>
-        </button>
+        <div className="flex items-center justify-between gap-3">
+          <button
+            type="button"
+            onClick={() => setShowDetail((v) => !v)}
+            className="flex-1 flex items-center justify-between text-left"
+          >
+            <h3 className="font-semibold text-gray-900">
+              制作観察メモ{" "}
+              <span className="text-xs font-normal text-gray-400 ml-1">（任意）</span>
+            </h3>
+            <span className="text-gray-400 text-sm">{showDetail ? "▲ 閉じる" : "▼ 開く"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowVisionTagger(true)}
+            className="flex-shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-medium transition-colors"
+            title="画像をAIで解析して4項目を自動生成"
+          >
+            ✨ AI 自動タグ付け
+          </button>
+        </div>
 
         {showDetail && (
           <div className="mt-4 space-y-4">
@@ -429,6 +463,15 @@ export function BenchmarkForm({ initial, mode }: Props) {
                 placeholder="例: ショートヘア・白ワンピ・青空背景・笑顔..."
                 value={characterNote}
                 onChange={(e) => setCharacterNote(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="label">背景・空間メモ</label>
+              <textarea
+                className={ta}
+                placeholder="例: 白基調のカフェ、自然光・ボケ背景が印象的..."
+                value={backgroundNote}
+                onChange={(e) => setBackgroundNote(e.target.value)}
               />
             </div>
             <div>

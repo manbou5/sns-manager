@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     const {
       accountName, postUrl, postedAt, bodyText,
       mediaType, videoDuration, compositionNote,
-      characterNote, aiReductionNote,
+      characterNote, backgroundNote, aiReductionNote,
       likes, reposts, replies, views,
       growthReasonNote, growthReasonTags, applicationNote,
     } = body;
@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
         videoDuration:   videoDuration?.trim()    || null,
         compositionNote: compositionNote?.trim()  || null,
         characterNote:   characterNote?.trim()    || null,
+        backgroundNote:  backgroundNote?.trim()   || null,
         aiReductionNote: aiReductionNote?.trim()  || null,
         likes:           Number(likes)    || 0,
         reposts:         Number(reposts)  || 0,

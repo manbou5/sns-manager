@@ -136,6 +136,7 @@ export const BENCHMARK_CSV_HEADERS = [
   "videoDuration",
   "compositionNote",
   "characterNote",
+  "backgroundNote",
   "aiReductionNote",
   "likes",
   "reposts",
@@ -173,6 +174,7 @@ export type ParsedBenchmarkRow = {
   videoDuration: string | null;
   compositionNote: string | null;
   characterNote: string | null;
+  backgroundNote: string | null;
   aiReductionNote: string | null;
   likes: number;
   reposts: number;
@@ -249,6 +251,7 @@ export function parseBenchmarkRow(
       videoDuration: get("videoDuration") || null,
       compositionNote: get("compositionNote") || null,
       characterNote: get("characterNote") || null,
+      backgroundNote: get("backgroundNote") || null,
       aiReductionNote: get("aiReductionNote") || null,
       likes: nums.likes,
       reposts: nums.reposts,
@@ -281,7 +284,8 @@ export function generateBenchmarkSampleCsv(): string {
       "IMAGE",
       "",
       "縦構図・顔アップで視線誘導",
-      "ショートヘア・白ワンピース・青空背景",
+      "ショートヘア・白ワンピース・笑顔",
+      "白基調のカフェ・自然光・ボケ背景",
       "髪の毛に細かいハイライトを追加",
       "1500",
       "80",
@@ -299,7 +303,8 @@ export function generateBenchmarkSampleCsv(): string {
       "VIDEO",
       "6秒",
       "縦パン→顔アップのカメラワーク",
-      "ロングヘア・水着風・海辺",
+      "ロングヘア・水着風・明るい笑顔",
+      "海辺・水面の反射・自然光・開放感",
       "水面の反射を追加してリアリティUP",
       "3200",
       "150",
