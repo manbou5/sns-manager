@@ -113,6 +113,7 @@ model PostQueue {
   // 実 SNS 投稿後に付与する外部 ID（現時点では未使用）
   externalPostId     String?
   errorMessage       String?
+  postedAt           DateTime?
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
 

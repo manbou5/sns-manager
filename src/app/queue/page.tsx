@@ -86,6 +86,8 @@ export default function QueuePage() {
   const [autoRunning,   setAutoRunning]   = useState(false);
   const [autoStatus,    setAutoStatus]    = useState<AutoPostStatus | null>(null);
   const [postingMode,   setPostingMode]   = useState<PostingMode | null>(null);
+  const [historyItems,  setHistoryItems]  = useState<PostQueueWithContent[]>([]);
+  const [historyOpen,   setHistoryOpen]   = useState(false);
 
   // ── データ取得 ────────────────────────────────────────────────────────────
 
@@ -124,11 +126,27 @@ export default function QueuePage() {
     } catch { /* サイレント失敗 */ }
   }, []);
 
+  const fetchHistory = useCallback(async () => {
+    try {
+      const [rPosted, rFailed] = await Promise.all([
+        fetch("/api/queue?status=posted"),
+        fetch("/api/queue?status=failed"),
+      ]);
+      const posted: PostQueueWithContent[] = rPosted.ok  ? await rPosted.json()  : [];
+      const failed: PostQueueWithContent[] = rFailed.ok  ? await rFailed.json()  : [];
+      const merged = [...posted, ...failed]
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        .slice(0, 20);
+      setHistoryItems(merged);
+    } catch { /* サイレント失敗 */ }
+  }, []);
+
   useEffect(() => {
     fetchItems();
     fetchAutoStatus();
     fetchPostingMode();
-  }, [fetchItems, fetchAutoStatus, fetchPostingMode]);
+    fetchHistory();
+  }, [fetchItems, fetchAutoStatus, fetchPostingMode, fetchHistory]);
 
   const queuedCount = items.filter((i) => i.status === "queued").length;
   const failedCount = items.filter((i) => i.status === "failed").length;
@@ -156,6 +174,7 @@ export default function QueuePage() {
       }
       await fetchItems();
       await fetchAutoStatus();
+      await fetchHistory();
     } catch {
       toast("自動投稿の実行に失敗しました", "error");
     } finally {
@@ -176,6 +195,7 @@ export default function QueuePage() {
         return;
       }
       toast("投稿済みに変更しました", "success");
+      fetchHistory();
       fetchItems();
       fetchAutoStatus();
     } catch {
@@ -539,6 +559,86 @@ export default function QueuePage() {
           </div>
         </div>
       )}
+
+      {/* ─── 実行履歴 ──────────────────────────────────────────────────────── */}
+      <div className="card p-0 overflow-hidden">
+        <button
+          onClick={() => setHistoryOpen((v) => !v)}
+          className="w-full flex items-center justify-between px-5 py-3.5 bg-gray-50 hover:bg-gray-100 transition-colors text-sm font-medium text-gray-700"
+        >
+          <span className="flex items-center gap-2">
+            <span>実行履歴</span>
+            <span className="text-xs font-normal text-gray-400">
+              （投稿済み / 失敗 — 直近 20 件）
+            </span>
+          </span>
+          <span className="text-gray-400 text-xs">{historyOpen ? "▲ 閉じる" : "▼ 開く"}</span>
+        </button>
+
+        {historyOpen && (
+          historyItems.length === 0 ? (
+            <p className="px-5 py-8 text-sm text-gray-400 text-center">履歴がありません</p>
+          ) : (
+            <ul className="divide-y divide-gray-100">
+              {historyItems.map((item) => {
+                const isPosted = item.status === "posted";
+                const ts = item.postedAt ?? item.updatedAt;
+                return (
+                  <li key={item.id} className="flex items-start gap-3 px-5 py-3.5">
+                    {/* ステータスドット */}
+                    <span
+                      className={`mt-1 flex-shrink-0 w-2 h-2 rounded-full ${
+                        isPosted ? "bg-green-500" : "bg-red-400"
+                      }`}
+                    />
+
+                    {/* メイン情報 */}
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium text-gray-800 truncate">
+                          {item.generatedContent.title ?? "(タイトルなし)"}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          {PLATFORM_LABELS[item.platform] ?? item.platform}
+                        </span>
+                        <span
+                          className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                            isPosted
+                              ? "bg-green-100 text-green-700"
+                              : "bg-red-100 text-red-600"
+                          }`}
+                        >
+                          {isPosted ? "成功" : "失敗"}
+                        </span>
+                      </div>
+
+                      {/* 投稿済み: externalPostId */}
+                      {isPosted && item.externalPostId && (
+                        <p className="text-xs text-gray-400 font-mono">
+                          ID: {item.externalPostId}
+                        </p>
+                      )}
+
+                      {/* 失敗: エラー理由 */}
+                      {!isPosted && item.errorMessage && (
+                        <p className="text-xs text-red-500 break-all">
+                          {item.errorMessage}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* タイムスタンプ */}
+                    <span className="flex-shrink-0 text-xs text-gray-400 whitespace-nowrap pt-0.5">
+                      {ts ? format(new Date(ts), "M/d HH:mm") : "—"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )
+        )}
+      </div>
+
     </div>
   );
 }

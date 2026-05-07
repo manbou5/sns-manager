@@ -105,6 +105,7 @@ export interface PostQueueItem {
   status: QueueStatus;
   externalPostId?: string | null;
   errorMessage?: string | null;
+  postedAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }

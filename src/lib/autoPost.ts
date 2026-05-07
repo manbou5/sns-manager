@@ -59,6 +59,7 @@ export async function runAutoPost(): Promise<AutoPostResult> {
             status: "posted",
             externalPostId: postResult.externalPostId ?? null,
             errorMessage: null,
+            postedAt: new Date(),
           },
         });
         await prisma.generatedContent.update({
