@@ -23,12 +23,24 @@ type ImageStatus = "pending" | "processing" | "done" | "failed";
 type ImageEntry = {
   file:    File;
   preview: string;
+  caption?: string;
   status:  ImageStatus;
   result:  VisionTagResult | null;
   error:   string | null;
 };
 
 type BatchItem = { index: number; file: File };
+
+// ─── ヘルパー ─────────────────────────────────────────────────────────────────
+
+function base64ToFile(base64: string, filename: string, mimeType: string): File {
+  const bytes   = atob(base64);
+  const arr     = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  return new File([arr], filename, { type: mimeType });
+}
+
+const X_RATE_LIMIT_MS = 3000;
 
 // ─── ステータスバッジ ─────────────────────────────────────────────────────────
 
@@ -47,9 +59,13 @@ function StatusBadge({ status }: { status: ImageStatus }) {
 // ─── ページ ────────────────────────────────────────────────────────────────────
 
 export default function BulkAnalyzePage() {
-  const [entries,  setEntries]  = useState<ImageEntry[]>([]);
-  const [running,  setRunning]  = useState(false);
-  const [dragOver, setDragOver] = useState(false);
+  const [entries,     setEntries]     = useState<ImageEntry[]>([]);
+  const [running,     setRunning]     = useState(false);
+  const [dragOver,    setDragOver]    = useState(false);
+  const [xUrl,        setXUrl]        = useState("");
+  const [xExtracting, setXExtracting] = useState(false);
+  const [xError,      setXError]      = useState<string | null>(null);
+  const [xLastFetch,  setXLastFetch]  = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // ── 集計
@@ -92,7 +108,8 @@ export default function BulkAnalyzePage() {
 
   const removeEntry = (idx: number) => {
     setEntries((prev) => {
-      URL.revokeObjectURL(prev[idx].preview);
+      const p = prev[idx].preview;
+      if (p.startsWith("blob:")) URL.revokeObjectURL(p);
       return prev.filter((_, i) => i !== idx);
     });
   };
@@ -193,7 +210,7 @@ export default function BulkAnalyzePage() {
   const handleDownload = () => {
     const rows: BulkAnalyzeRow[] = entries
       .filter((e) => e.status === "done")
-      .map((e) => ({ filename: e.file.name, result: e.result }));
+      .map((e) => ({ filename: e.file.name, caption: e.caption, result: e.result }));
     const csv = generateBulkAnalyzeCsv(rows);
     const ts  = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     downloadCsv(csv, `benchmark_bulk_${ts}.csv`);
@@ -201,8 +218,66 @@ export default function BulkAnalyzePage() {
 
   // ── 全クリア
   const handleClear = () => {
-    entries.forEach((e) => URL.revokeObjectURL(e.preview));
+    entries.forEach((e) => {
+      if (e.preview.startsWith("blob:")) URL.revokeObjectURL(e.preview);
+    });
     setEntries([]);
+  };
+
+  // ── X URL から画像取得
+  const handleXExtract = async () => {
+    const trimmed = xUrl.trim();
+    if (!trimmed) return;
+
+    const now = Date.now();
+    if (now - xLastFetch < X_RATE_LIMIT_MS) {
+      setXError(`連続リクエストを防ぐため ${X_RATE_LIMIT_MS / 1000} 秒間隔を空けてください`);
+      return;
+    }
+
+    setXExtracting(true);
+    setXError(null);
+
+    try {
+      const res  = await fetch("/api/benchmark/x-extract", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ url: trimmed }),
+      });
+      type XExtractResponse = {
+        tweetId?: string; caption?: string;
+        images?: { filename: string; base64: string; mimeType: string; previewDataUrl: string }[];
+        error?: string;
+      };
+      const data: XExtractResponse = await res.json();
+
+      if (!res.ok || !data.images) {
+        setXError(data.error ?? "画像の取得に失敗しました");
+        return;
+      }
+
+      setXLastFetch(Date.now());
+
+      const newEntries: ImageEntry[] = data.images.map(({ filename, base64, mimeType, previewDataUrl }) => ({
+        file:    base64ToFile(base64, filename, mimeType),
+        preview: previewDataUrl,
+        caption: data.caption ?? undefined,
+        status:  "pending" as const,
+        result:  null,
+        error:   null,
+      }));
+
+      setEntries((prev) => {
+        const remaining = MAX_FILES - prev.length;
+        return [...prev, ...newEntries.slice(0, remaining)];
+      });
+
+      setXUrl("");
+    } catch (e) {
+      setXError(e instanceof Error ? e.message : "ネットワークエラー");
+    } finally {
+      setXExtracting(false);
+    }
   };
 
   // ─── レンダー ───────────────────────────────────────────────────────────────
@@ -222,6 +297,39 @@ export default function BulkAnalyzePage() {
           ← ベンチマーク
         </Link>
       </div>
+
+      {/* X URL 入力 */}
+      {total < MAX_FILES && (
+        <div className="card space-y-2">
+          <p className="text-sm font-semibold text-gray-700">
+            𝕏 投稿 URL から画像を取得
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={xUrl}
+              onChange={(e) => { setXUrl(e.target.value); setXError(null); }}
+              onKeyDown={(e) => { if (e.key === "Enter") handleXExtract(); }}
+              placeholder="https://x.com/username/status/1234567890"
+              className="input flex-1 text-sm font-mono"
+              disabled={xExtracting}
+            />
+            <button
+              onClick={handleXExtract}
+              disabled={!xUrl.trim() || xExtracting}
+              className="btn-primary text-sm whitespace-nowrap disabled:opacity-50"
+            >
+              {xExtracting ? "取得中…" : "画像取得"}
+            </button>
+          </div>
+          {xError && (
+            <p className="text-xs text-red-500 leading-snug">{xError}</p>
+          )}
+          <p className="text-xs text-gray-400">
+            ツイートのテキストがキャプション列に自動入力されます。X API の Read 権限と環境変数（X_API_KEY 等）が必要です。
+          </p>
+        </div>
+      )}
 
       {/* ドロップゾーン */}
       {total < MAX_FILES && (
@@ -366,7 +474,7 @@ export default function BulkAnalyzePage() {
                     {entry.file.name}
                   </p>
                   <p className="text-xs text-gray-400 truncate">
-                    caption: {filenameToCaption(entry.file.name) || "(空)"}
+                    caption: {(entry.caption ?? filenameToCaption(entry.file.name)) || "(空)"}
                   </p>
                   <StatusBadge status={entry.status} />
                   {entry.error && (

@@ -396,3 +396,13 @@ export interface VisionTagBatchItem {
   result:   VisionTagResult | null;
   error:    string | null;
 }
+
+// ─── ツイートメトリクス ──────────────────────────────────────────────────────────
+
+export interface TweetMetrics {
+  likes:     number | null;
+  comments:  number | null;
+  shares:    number | null;
+  views:     number | null;
+  mediaType: MediaType;
+}
