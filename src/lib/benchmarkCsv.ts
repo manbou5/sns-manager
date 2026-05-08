@@ -1,24 +1,24 @@
 /**
  * ベンチマーク分析 CSV ユーティリティ
- * - RFC 4180 準拠 CSV パーサー（フィールド内カンマ・改行・ダブルクォートに対応）
+ * - RFC 4180 準拠 CSV パーサー
  * - タグ エンコード / デコード ユーティリティ
  * - サンプル CSV 生成
  *
- * このファイルはサーバー・クライアント両側から import できる（Prisma 等の依存なし）
+ * CSV ヘッダー仕様は一括解析CSV（bulkAnalyzeCsv.ts）と統一されています。
+ * このファイルはサーバー・クライアント両側から import できます（Prisma 等の依存なし）。
  */
 
 // ─── CSV パーサー ──────────────────────────────────────────────────────────────
 
 /**
  * RFC 4180 準拠 CSV パーサー
- * - UTF-8 BOM 除去
- * - \r\n / \r / \n を統一
+ * - UTF-8 BOM 除去 / \r\n 統一
  * - "" によるダブルクォートエスケープに対応
  * - フィールド内改行に対応（ダブルクォート囲み必須）
  */
 export function parseCSV(rawText: string): string[][] {
   const text = rawText
-    .replace(/^﻿/, "") // UTF-8 BOM 除去
+    .replace(/^﻿/, "")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n");
 
@@ -33,7 +33,6 @@ export function parseCSV(rawText: string): string[][] {
 
     if (ch === '"') {
       if (inQuotes && text[i + 1] === '"') {
-        // "" → " (エスケープされたクォート)
         cell += '"';
         i += 2;
       } else {
@@ -47,9 +46,7 @@ export function parseCSV(rawText: string): string[][] {
     } else if (ch === "\n" && !inQuotes) {
       row.push(cell.trim());
       cell = "";
-      if (row.some((c) => c !== "")) {
-        rows.push(row);
-      }
+      if (row.some((c) => c !== "")) rows.push(row);
       row = [];
       i++;
     } else {
@@ -58,21 +55,14 @@ export function parseCSV(rawText: string): string[][] {
     }
   }
 
-  // 最終行の処理（末尾に改行がない場合）
   row.push(cell.trim());
-  if (row.some((c) => c !== "")) {
-    rows.push(row);
-  }
+  if (row.some((c) => c !== "")) rows.push(row);
 
   return rows;
 }
 
 // ─── タグ自動提案 ──────────────────────────────────────────────────────────────
 
-/**
- * キャプション本文とメディア種別からルールベースでタグを提案する。
- * GROWTH_REASON_TAGS の値のみを返す。クライアント・サーバー両側から使用可。
- */
 export function suggestTagsFromContent(caption: string, mediaType: string): string[] {
   const suggested = new Set<string>();
   const t = caption.toLowerCase();
@@ -93,103 +83,129 @@ export function suggestTagsFromContent(caption: string, mediaType: string): stri
 
 // ─── タグ ユーティリティ ───────────────────────────────────────────────────────
 
-/**
- * タグ配列を DB 保存用文字列にエンコード
- * ["構図", "表情"] → "|構図|表情|"
- * [] → null
- */
+/** タグ配列を DB 保存用文字列にエンコード: ["構図", "表情"] → "|構図|表情|" */
 export function encodeTags(tags: string[]): string | null {
   const cleaned = tags.map((t) => t.trim()).filter(Boolean);
   return cleaned.length > 0 ? `|${cleaned.join("|")}|` : null;
 }
 
-/**
- * DB 保存用文字列をタグ配列にデコード
- * "|構図|表情|" → ["構図", "表情"]
- * null → []
- */
+/** DB 保存用文字列をタグ配列にデコード: "|構図|表情|" → ["構図", "表情"] */
 export function decodeTags(encoded: string | null | undefined): string[] {
   if (!encoded) return [];
   return encoded.split("|").filter(Boolean);
 }
 
-/**
- * CSV の "|" 区切りタグ文字列をタグ配列に変換（CSV 読み取り時）
- * "構図|表情" → ["構図", "表情"]
- */
+/** CSV の "|" 区切りタグ文字列をタグ配列に変換 */
 export function parseTagsFromCsv(value: string): string[] {
   if (!value.trim()) return [];
-  return value
-    .split("|")
-    .map((t) => t.trim())
-    .filter(Boolean);
+  return value.split("|").map((t) => t.trim()).filter(Boolean);
 }
 
 // ─── CSV ヘッダー定義 ──────────────────────────────────────────────────────────
+//
+// 一括解析 CSV（bulkAnalyzeCsv.ts）と共通の 15 列を先頭に置き、
+// ベンチマーク専用の任意列を後半に並べる。
+//
+// 列名変更（旧 → 新）:
+//   bodyText        → caption
+//   reposts         → shares
+//   replies         → comments
+//   growthReasonNote → growthReasonMemo
 
 export const BENCHMARK_CSV_HEADERS = [
-  "accountName",
+  // ── 一括解析CSVと共通（必須 11列 + 任意 4列）
   "postUrl",
-  "postedAt",
-  "bodyText",
+  "platform",
+  "caption",
   "mediaType",
-  "videoDuration",
+  "views",
+  "likes",
+  "comments",
+  "shares",
+  "saves",
+  "followersGained",
+  "er",
+  "growthReasonMemo",
   "compositionNote",
   "characterNote",
   "backgroundNote",
+  // ── ベンチマーク専用（すべて任意）
+  "accountName",
+  "postedAt",
+  "videoDuration",
   "aiReductionNote",
-  "likes",
-  "reposts",
-  "replies",
-  "views",
-  "growthReasonNote",
   "growthReasonTags",
   "applicationNote",
 ] as const;
 
 export type BenchmarkCsvHeader = (typeof BENCHMARK_CSV_HEADERS)[number];
 
-// ─── 行パーサー ────────────────────────────────────────────────────────────────
+// ─── 必須カラム ────────────────────────────────────────────────────────────────
 
-type ColIndex = Record<BenchmarkCsvHeader, number>;
+const REQUIRED_COLS: BenchmarkCsvHeader[] = [
+  "postUrl",
+  "caption",
+  "mediaType",
+  "views",
+  "likes",
+  "comments",
+  "shares",
+  "growthReasonMemo",
+  "compositionNote",
+  "characterNote",
+  "backgroundNote",
+];
 
-/** ヘッダー行からカラムインデックスマップを構築 */
-export function buildColIndex(headerRow: string[]): ColIndex | null {
+// ─── カラムインデックス構築 ────────────────────────────────────────────────────
+
+/** ヘッダー行からカラムインデックスマップを構築する。必須列が不足している場合は null を返す。 */
+export function buildColIndex(
+  headerRow: string[]
+): Record<BenchmarkCsvHeader, number> | null {
   const lower = headerRow.map((h) => h.toLowerCase());
-  const result = {} as ColIndex;
+
+  const missing = REQUIRED_COLS.filter((h) => !lower.includes(h.toLowerCase()));
+  if (missing.length > 0) return null;
+
+  const result = {} as Record<BenchmarkCsvHeader, number>;
   for (const h of BENCHMARK_CSV_HEADERS) {
-    const idx = lower.indexOf(h.toLowerCase());
-    if (idx === -1) return null;
-    result[h] = idx;
+    result[h] = lower.indexOf(h.toLowerCase()); // 任意列が無い場合は -1
   }
   return result;
 }
 
+/** 不足している必須カラム名を返す（エラーメッセージ用） */
+export function getMissingRequiredCols(headerRow: string[]): string[] {
+  const lower = headerRow.map((h) => h.toLowerCase());
+  return REQUIRED_COLS.filter((h) => !lower.includes(h.toLowerCase()));
+}
+
+// ─── 行パーサー ────────────────────────────────────────────────────────────────
+
 export type ParsedBenchmarkRow = {
-  accountName: string;
-  postUrl: string | null;
-  postedAt: Date | null;
-  bodyText: string | null;
-  mediaType: string;
-  videoDuration: string | null;
+  accountName:     string;
+  postUrl:         string | null;
+  postedAt:        Date | null;
+  bodyText:        string | null;  // CSV: caption
+  mediaType:       string;
+  videoDuration:   string | null;
   compositionNote: string | null;
-  characterNote: string | null;
-  backgroundNote: string | null;
+  characterNote:   string | null;
+  backgroundNote:  string | null;
   aiReductionNote: string | null;
-  likes: number;
-  reposts: number;
-  replies: number;
-  views: number;
-  growthReasonNote: string | null;
+  likes:           number;
+  reposts:         number;         // CSV: shares
+  replies:         number;         // CSV: comments
+  views:           number;
+  growthReasonNote: string | null; // CSV: growthReasonMemo
   growthReasonTags: string | null;
   applicationNote: string | null;
 };
 
 export type RowParseResult =
-  | { ok: true; data: ParsedBenchmarkRow }
+  | { ok: true;  data: ParsedBenchmarkRow }
   | { ok: false; errors: string[] };
 
-/** 0以上の整数を返す。空文字は0扱い。不正な値は null */
 function parseNum(value: string): number | null {
   if (value === "") return 0;
   if (!/^\d+$/.test(value)) return null;
@@ -197,7 +213,6 @@ function parseNum(value: string): number | null {
   return Number.isFinite(n) && n >= 0 ? n : null;
 }
 
-/** 日付文字列を Date に変換 */
 function parseDate(value: string): Date | null {
   if (!value) return null;
   const d = new Date(value);
@@ -206,60 +221,75 @@ function parseDate(value: string): Date | null {
 
 const VALID_MEDIA_TYPES = new Set(["IMAGE", "VIDEO", "MIXED"]);
 
-/** 1行のデータをバリデーション・変換する */
+/**
+ * 1行のデータをバリデーション・変換する。
+ *
+ * CSV 列名 → DB フィールド名 マッピング:
+ *   caption          → bodyText
+ *   shares           → reposts
+ *   comments         → replies
+ *   growthReasonMemo → growthReasonNote
+ */
 export function parseBenchmarkRow(
   cells: string[],
-  col: ColIndex
+  col: Record<BenchmarkCsvHeader, number>
 ): RowParseResult {
-  const get = (h: BenchmarkCsvHeader) => cells[col[h]]?.trim() ?? "";
+  const get = (h: BenchmarkCsvHeader): string => {
+    const idx = col[h];
+    return idx >= 0 ? (cells[idx]?.trim() ?? "") : "";
+  };
 
   const errors: string[] = [];
 
-  const accountName = get("accountName");
-  if (!accountName) errors.push("accountName が空です");
-
+  const accountName  = get("accountName") || "";
   const mediaTypeRaw = get("mediaType").toUpperCase() || "IMAGE";
-  const mediaType = VALID_MEDIA_TYPES.has(mediaTypeRaw) ? mediaTypeRaw : "IMAGE";
+  const mediaType    = VALID_MEDIA_TYPES.has(mediaTypeRaw) ? mediaTypeRaw : "IMAGE";
 
-  const numFields = ["likes", "reposts", "replies", "views"] as const;
+  // 数値フィールド（新列名で読む）
+  const numFields: { col: BenchmarkCsvHeader; label: string }[] = [
+    { col: "likes",    label: "likes"    },
+    { col: "comments", label: "comments" },
+    { col: "shares",   label: "shares"   },
+    { col: "views",    label: "views"    },
+  ];
   const nums: Record<string, number> = {};
-  for (const f of numFields) {
-    const n = parseNum(get(f));
+  for (const { col: c, label } of numFields) {
+    const n = parseNum(get(c));
     if (n === null) {
-      errors.push(`${f} が無効な値です ("${get(f)}")`);
+      errors.push(`${label} が無効な値です ("${get(c)}")`);
     } else {
-      nums[f] = n;
+      nums[label] = n;
     }
   }
 
   if (errors.length > 0) return { ok: false, errors };
 
-  const rawTags = parseTagsFromCsv(get("growthReasonTags"));
-  // タグが未指定の場合、キャプションとメディア種別からルールベースで自動提案
+  // growthReasonTags: 任意。空の場合は caption + mediaType からルールベースで提案
+  const rawTags  = parseTagsFromCsv(get("growthReasonTags"));
   const finalTags = rawTags.length > 0
     ? rawTags
-    : suggestTagsFromContent(get("bodyText"), mediaType);
+    : suggestTagsFromContent(get("caption"), mediaType);
 
   return {
     ok: true,
     data: {
       accountName,
-      postUrl: get("postUrl") || null,
-      postedAt: parseDate(get("postedAt")),
-      bodyText: get("bodyText") || null,
+      postUrl:          get("postUrl")        || null,
+      postedAt:         parseDate(get("postedAt")),
+      bodyText:         get("caption")        || null,   // caption → bodyText (DB)
       mediaType,
-      videoDuration: get("videoDuration") || null,
-      compositionNote: get("compositionNote") || null,
-      characterNote: get("characterNote") || null,
-      backgroundNote: get("backgroundNote") || null,
-      aiReductionNote: get("aiReductionNote") || null,
-      likes: nums.likes,
-      reposts: nums.reposts,
-      replies: nums.replies,
-      views: nums.views,
-      growthReasonNote: get("growthReasonNote") || null,
+      videoDuration:    get("videoDuration")  || null,
+      compositionNote:  get("compositionNote") || null,
+      characterNote:    get("characterNote")  || null,
+      backgroundNote:   get("backgroundNote") || null,
+      aiReductionNote:  get("aiReductionNote") || null,
+      likes:            nums.likes,
+      reposts:          nums.shares,    // shares   → reposts (DB)
+      replies:          nums.comments,  // comments → replies (DB)
+      views:            nums.views,
+      growthReasonNote: get("growthReasonMemo") || null, // growthReasonMemo → growthReasonNote (DB)
       growthReasonTags: encodeTags(finalTags),
-      applicationNote: get("applicationNote") || null,
+      applicationNote:  get("applicationNote") || null,
     },
   };
 }
@@ -275,51 +305,59 @@ function quoteCell(value: string): string {
 
 export function generateBenchmarkSampleCsv(): string {
   const headers = BENCHMARK_CSV_HEADERS.join(",");
+
+  // 列順: postUrl,platform,caption,mediaType,views,likes,comments,shares,saves,
+  //       followersGained,er,growthReasonMemo,compositionNote,characterNote,backgroundNote,
+  //       accountName,postedAt,videoDuration,aiReductionNote,growthReasonTags,applicationNote
   const rows = [
     [
-      "@sample_account",
       "https://x.com/sample/status/123456789",
-      "2025-06-12 20:00",
+      "X",
       "今日のコーデ🌸 シンプルだけど特別な一日。",
       "IMAGE",
+      "35000",
+      "1500",
+      "20",
+      "80",
       "",
+      "",
+      "",
+      "顔のアップが効果的。投稿時間も良かった。",
       "縦構図・顔アップで視線誘導",
       "ショートヘア・白ワンピース・笑顔",
       "白基調のカフェ・自然光・ボケ背景",
+      "@sample_account",
+      "2025-06-12 20:00",
+      "",
       "髪の毛に細かいハイライトを追加",
-      "1500",
-      "80",
-      "20",
-      "35000",
-      "顔のアップが効果的。投稿時間も良かった。",
       "構図|表情",
       "同じ構図で夕方バージョンを試す",
     ],
     [
-      "@another_account",
       "https://x.com/another/status/987654321",
-      "2025-06-10 12:00",
+      "X",
       "夏の光の中で🌞 風が気持ちよかった一日。",
       "VIDEO",
-      "6秒",
+      "98000",
+      "3200",
+      "45",
+      "150",
+      "",
+      "",
+      "",
+      "動画テンポが良く最後まで見られた",
       "縦パン→顔アップのカメラワーク",
       "ロングヘア・水着風・明るい笑顔",
       "海辺・水面の反射・自然光・開放感",
+      "@another_account",
+      "2025-06-10 12:00",
+      "6秒",
       "水面の反射を追加してリアリティUP",
-      "3200",
-      "150",
-      "45",
-      "98000",
-      "動画テンポが良く最後まで見られた",
       "動画テンポ|カメラワーク|背景",
       "同様のカメラワークで室内バージョンを作成",
     ],
   ];
 
-  const lines = rows
-    .map((row) => row.map(quoteCell).join(","))
-    .join("\n");
-
-  // Excel対応のためUTF-8 BOMを付与
+  const lines = rows.map((row) => row.map(quoteCell).join(",")).join("\n");
   return "﻿" + headers + "\n" + lines;
 }

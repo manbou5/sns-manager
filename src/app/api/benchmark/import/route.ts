@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { parseCSV, buildColIndex, parseBenchmarkRow, type ParsedBenchmarkRow } from "@/lib/benchmarkCsv";
+import { parseCSV, buildColIndex, getMissingRequiredCols, parseBenchmarkRow, type ParsedBenchmarkRow } from "@/lib/benchmarkCsv";
 import type { BenchmarkImportError } from "@/types";
 
 export async function POST(req: NextRequest) {
@@ -32,10 +32,11 @@ export async function POST(req: NextRequest) {
   // ── ヘッダー検証
   const colIndex = buildColIndex(rows[0]);
   if (!colIndex) {
+    const missing = getMissingRequiredCols(rows[0]);
     return NextResponse.json(
       {
-        error: "必須カラムが不足しています",
-        hint: "accountName, postUrl, postedAt, bodyText, mediaType, videoDuration, compositionNote, characterNote, backgroundNote, aiReductionNote, likes, reposts, replies, views, growthReasonNote, growthReasonTags, applicationNote",
+        error: `必須カラムが不足しています: ${missing.join(", ")}`,
+        hint: "必須: postUrl, caption, mediaType, views, likes, comments, shares, growthReasonMemo, compositionNote, characterNote, backgroundNote",
       },
       { status: 400 }
     );

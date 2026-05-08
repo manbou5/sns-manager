@@ -10,13 +10,13 @@ interface ImportResult {
   errors:   BenchmarkImportError[];
 }
 
-// プレビューで表示するカラム
+// プレビューで表示するカラム（一括解析CSVと共通の主要列）
 const PREVIEW_COLS = [
-  { key: "accountName",      label: "アカウント" },
-  { key: "mediaType",        label: "メディア"   },
-  { key: "views",            label: "表示数"     },
-  { key: "likes",            label: "いいね"     },
-  { key: "growthReasonTags", label: "タグ"       },
+  { key: "caption",          label: "キャプション" },
+  { key: "mediaType",        label: "メディア"     },
+  { key: "views",            label: "表示数"       },
+  { key: "likes",            label: "いいね"       },
+  { key: "growthReasonMemo", label: "成長メモ"     },
 ] as const;
 
 interface Props {
@@ -72,13 +72,13 @@ export function BenchmarkCsvImport({ onImportComplete }: Props) {
     const lowerHeaders = headers.map((h) => h.toLowerCase());
 
     const REQUIRED = [
-      "accountname","posturl","postedat","bodytext","mediatype","videoduration",
-      "compositionnote","characternote","aireductionnote","likes","reposts",
-      "replies","views","growthreasonnote","growthreasontags","applicationnote",
+      "posturl", "caption", "mediatype",
+      "views", "likes", "comments", "shares",
+      "growthreasonmemo", "compositionnote", "characternote", "backgroundnote",
     ];
     const missing = REQUIRED.filter((r) => !lowerHeaders.includes(r));
     if (missing.length > 0) {
-      setParseError(`必須カラムが不足: ${missing.join(", ")}`);
+      setParseError(`必須カラムが不足しています: ${missing.join(", ")}`);
       return;
     }
 
@@ -145,16 +145,23 @@ export function BenchmarkCsvImport({ onImportComplete }: Props) {
       {isOpen && (
         <div className="mt-4 space-y-4">
           {/* フォーマット説明 */}
-          <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 space-y-1">
-            <p className="font-medium text-gray-700">CSVフォーマット（16カラム）</p>
-            <p className="font-mono break-all text-gray-500">
-              accountName, postUrl, postedAt, bodyText, mediaType, videoDuration,
-              compositionNote, characterNote, aiReductionNote, likes, reposts,
-              replies, views, growthReasonNote, <strong>growthReasonTags</strong>, applicationNote
+          <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 space-y-1.5">
+            <p className="font-medium text-gray-700">CSVフォーマット（一括解析CSVと共通仕様）</p>
+            <p className="font-mono break-all text-gray-500 leading-relaxed">
+              <span className="text-gray-800 font-semibold">必須:</span>{" "}
+              postUrl, caption, mediaType, views, likes, comments, shares,
+              growthReasonMemo, compositionNote, characterNote, backgroundNote
             </p>
-            <p>※ <code>growthReasonTags</code> は <code>|</code> 区切り（例: <code>構図|表情</code>）。
-              空欄の場合はキャプション・メディア種別からタグを自動提案します。</p>
-            <p>※ <code>postUrl</code> が既存レコードと一致する行は重複としてスキップされます。</p>
+            <p className="font-mono break-all text-gray-400 leading-relaxed">
+              <span className="font-semibold">任意:</span>{" "}
+              platform, saves, followersGained, er, accountName, postedAt,
+              videoDuration, aiReductionNote, growthReasonTags, applicationNote
+            </p>
+            <div className="space-y-0.5 text-gray-500">
+              <p>※ 一括解析CSV（画像一括解析 → CSV生成）をそのまま読み込めます。</p>
+              <p>※ <code>growthReasonTags</code> は <code>|</code> 区切り（例: <code>構図|表情</code>）。省略時はキャプションから自動提案。</p>
+              <p>※ <code>postUrl</code> が既存レコードと一致する行は重複としてスキップされます。</p>
+            </div>
           </div>
 
           <div className="flex gap-3">
