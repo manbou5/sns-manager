@@ -75,6 +75,19 @@ export async function POST(req: NextRequest) {
 
   const headers = splitCSVRow(lines[0]).map((h) => h.toLowerCase());
 
+  // ベンチマーク CSV の誤アップロード検出
+  const BENCHMARK_MARKERS = ["posturl", "growthreasonmemo"];
+  if (BENCHMARK_MARKERS.some((m) => headers.includes(m))) {
+    return NextResponse.json(
+      {
+        error:
+          "このCSVはベンチマーク用です。/benchmark のCSVインポートで読み込んでください。",
+        benchmarkCsv: true,
+      },
+      { status: 400 }
+    );
+  }
+
   // 必須カラムの存在確認
   const REQUIRED = ["postid", "impressions", "likes", "reposts", "clicks", "followersgained"];
   const missing = REQUIRED.filter((h) => !headers.includes(h));

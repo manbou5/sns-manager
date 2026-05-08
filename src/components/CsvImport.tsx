@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 
 // ─── 型定義 ────────────────────────────────────────────────────────────────────
 
@@ -40,6 +41,19 @@ function downloadSampleCSV() {
   a.download = "analytics_import_sample.csv";
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ─── ベンチマーク CSV 判定 ─────────────────────────────────────────────────────
+
+/**
+ * 先頭行のヘッダーを見てベンチマーク用 CSV かどうかを判定する。
+ * ベンチマーク CSV は "postUrl" や "growthReasonMemo" を含む。
+ * 分析用 CSV は "postId" を含む。
+ */
+function detectBenchmarkCsv(text: string): boolean {
+  const firstLine = text.replace(/^﻿/, "").split(/\r?\n/)[0] ?? "";
+  const headers   = firstLine.split(",").map((h) => h.trim().toLowerCase());
+  return headers.includes("posturl") || headers.includes("growthreasonmemo");
 }
 
 // ─── クライアントサイドCSVプレビュー ─────────────────────────────────────────
@@ -94,6 +108,7 @@ export function CsvImport({ onImportComplete }: Props) {
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [fatalError, setFatalError] = useState<string | null>(null);
+  const [isBenchmarkCsv, setIsBenchmarkCsv] = useState(false);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files?.[0] ?? null;
@@ -111,6 +126,12 @@ export function CsvImport({ onImportComplete }: Props) {
     }
 
     const text = await selected.text();
+
+    if (detectBenchmarkCsv(text)) {
+      setIsBenchmarkCsv(true);
+      return;
+    }
+
     const rows = parsePreview(text);
 
     // 総データ行数
@@ -146,7 +167,13 @@ export function CsvImport({ onImportComplete }: Props) {
       const data = await res.json();
 
       if (!res.ok) {
-        setFatalError(data.error ?? "インポートに失敗しました");
+        if ((data as { benchmarkCsv?: boolean }).benchmarkCsv) {
+          setIsBenchmarkCsv(true);
+          setFile(null);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        } else {
+          setFatalError(data.error ?? "インポートに失敗しました");
+        }
         return;
       }
       setResult(data as ImportResult);
@@ -167,6 +194,7 @@ export function CsvImport({ onImportComplete }: Props) {
     setResult(null);
     setFatalError(null);
     setTotalRows(0);
+    setIsBenchmarkCsv(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -203,6 +231,33 @@ export function CsvImport({ onImportComplete }: Props) {
               file:text-sm file:font-medium file:bg-brand-50 file:text-brand-700
               hover:file:bg-brand-100 cursor-pointer"
           />
+        </div>
+      )}
+
+      {/* ベンチマーク CSV 誤読み込みエラー */}
+      {isBenchmarkCsv && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 space-y-3">
+          <p className="font-semibold text-sm text-amber-800">
+            ⚠️ このCSVはベンチマーク用です
+          </p>
+          <p className="text-sm text-amber-700">
+            選択されたCSVは画像一括解析（ベンチマーク）形式のファイルです。
+            このページ（分析）ではインポートできません。
+          </p>
+          <p className="text-sm text-amber-700">
+            ベンチマークデータとして登録する場合は、ベンチマーク管理ページの CSV インポートをご利用ください。
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            <Link
+              href="/benchmark"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 transition-colors"
+            >
+              ベンチマーク管理へ →
+            </Link>
+            <button onClick={handleReset} className="btn-secondary text-sm">
+              別のファイルを選択
+            </button>
+          </div>
         </div>
       )}
 
