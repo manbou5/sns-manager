@@ -21,12 +21,19 @@ const BATCH_SIZE = 5;
 type ImageStatus = "pending" | "processing" | "done" | "failed";
 
 type ImageEntry = {
-  file:    File;
-  preview: string;
-  caption?: string;
-  status:  ImageStatus;
-  result:  VisionTagResult | null;
-  error:   string | null;
+  file:       File;
+  preview:    string;
+  caption?:   string;
+  postUrl?:   string;
+  platform?:  string;
+  mediaType?: string;
+  views?:     number | null;
+  likes?:     number | null;
+  comments?:  number | null;
+  shares?:    number | null;
+  status:     ImageStatus;
+  result:     VisionTagResult | null;
+  error:      string | null;
 };
 
 type BatchItem = { index: number; file: File };
@@ -54,6 +61,27 @@ const STATUS_MAP: Record<ImageStatus, { label: string; className: string }> = {
 function StatusBadge({ status }: { status: ImageStatus }) {
   const { label, className } = STATUS_MAP[status];
   return <span className={`text-xs ${className}`}>{label}</span>;
+}
+
+function MetricChip({ icon, value }: { icon: string; value: number | null | undefined }) {
+  return (
+    <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded text-[11px] bg-sky-50 border border-sky-100 text-sky-600">
+      {icon}{" "}
+      {value != null ? (
+        <span className="font-medium tabular-nums">{value.toLocaleString()}</span>
+      ) : (
+        <span className="text-gray-400 italic text-[10px]">未取得</span>
+      )}
+    </span>
+  );
+}
+
+type MetricLike = { views?: number | null; likes?: number | null; comments?: number | null; shares?: number | null };
+function computeEr(e: MetricLike): string | null {
+  const { views, likes, comments, shares } = e;
+  if (views == null || views === 0) return null;
+  const eng = (likes ?? 0) + (comments ?? 0) + (shares ?? 0);
+  return ((eng / views) * 100).toFixed(2);
 }
 
 // ─── ページ ────────────────────────────────────────────────────────────────────
@@ -210,7 +238,18 @@ export default function BulkAnalyzePage() {
   const handleDownload = () => {
     const rows: BulkAnalyzeRow[] = entries
       .filter((e) => e.status === "done")
-      .map((e) => ({ filename: e.file.name, caption: e.caption, result: e.result }));
+      .map((e) => ({
+        filename:  e.file.name,
+        caption:   e.caption,
+        postUrl:   e.postUrl,
+        platform:  e.platform,
+        mediaType: e.mediaType,
+        views:     e.views,
+        likes:     e.likes,
+        comments:  e.comments,
+        shares:    e.shares,
+        result:    e.result,
+      }));
     const csv = generateBulkAnalyzeCsv(rows);
     const ts  = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     downloadCsv(csv, `benchmark_bulk_${ts}.csv`);
@@ -245,7 +284,14 @@ export default function BulkAnalyzePage() {
         body:    JSON.stringify({ url: trimmed }),
       });
       type XExtractResponse = {
-        tweetId?: string; caption?: string;
+        tweetId?: string;
+        postUrl?: string;
+        caption?: string;
+        metrics?: {
+          likes: number | null; comments: number | null;
+          shares: number | null; views: number | null;
+          mediaType: string;
+        };
         images?: { filename: string; base64: string; mimeType: string; previewDataUrl: string }[];
         error?: string;
       };
@@ -259,12 +305,19 @@ export default function BulkAnalyzePage() {
       setXLastFetch(Date.now());
 
       const newEntries: ImageEntry[] = data.images.map(({ filename, base64, mimeType, previewDataUrl }) => ({
-        file:    base64ToFile(base64, filename, mimeType),
-        preview: previewDataUrl,
-        caption: data.caption ?? undefined,
-        status:  "pending" as const,
-        result:  null,
-        error:   null,
+        file:      base64ToFile(base64, filename, mimeType),
+        preview:   previewDataUrl,
+        caption:   data.caption ?? undefined,
+        postUrl:   data.postUrl ?? undefined,
+        platform:  "X",
+        mediaType: data.metrics?.mediaType ?? "IMAGE",
+        views:     data.metrics?.views    ?? null,
+        likes:     data.metrics?.likes    ?? null,
+        comments:  data.metrics?.comments ?? null,
+        shares:    data.metrics?.shares   ?? null,
+        status:    "pending" as const,
+        result:    null,
+        error:     null,
       }));
 
       setEntries((prev) => {
@@ -445,13 +498,18 @@ export default function BulkAnalyzePage() {
 
       {/* CSV プレビュー情報 */}
       {doneCount > 0 && (
-        <div className="rounded-xl bg-gray-50 border border-gray-200 px-4 py-3 text-xs text-gray-500 space-y-1">
-          <p className="font-medium text-gray-700">CSV ヘッダー（出力イメージ）</p>
-          <p className="font-mono break-all text-gray-400">
-            postUrl, platform, caption, mediaType, views, likes, comments, shares, saves, followersGained, er,{" "}
+        <div className="rounded-xl bg-gray-50 border border-gray-200 px-4 py-3 text-xs text-gray-500 space-y-1.5">
+          <p className="font-medium text-gray-700">CSV 出力内容</p>
+          <p className="font-mono break-all text-gray-400 leading-relaxed">
+            <span className="text-sky-600 font-semibold">postUrl, platform, caption, mediaType, views, likes, comments, shares, er</span>
+            {", saves, followersGained, "}
             <span className="text-violet-600 font-semibold">growthReasonMemo, compositionNote, characterNote, backgroundNote</span>
           </p>
-          <p>紫色の 4 列が AI 解析結果です。残りは手動で補完してください。</p>
+          <div className="space-y-0.5">
+            <p><span className="text-sky-600 font-semibold">青字</span> = X URL 取得分は自動入力。views がある場合は ER も自動計算。</p>
+            <p><span className="text-violet-600 font-semibold">紫字</span> = AI 解析結果（Vision）。</p>
+            <p>saves / followersGained は X API 非対応のため空欄。手動で補完してください。</p>
+          </div>
         </div>
       )}
 
@@ -470,12 +528,38 @@ export default function BulkAnalyzePage() {
                   className="w-16 h-16 object-cover rounded-lg flex-shrink-0 bg-gray-100"
                 />
                 <div className="flex-1 min-w-0 space-y-1">
-                  <p className="text-sm font-medium text-gray-800 truncate">
-                    {entry.file.name}
-                  </p>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {entry.platform && (
+                      <span className="shrink-0 px-1 py-0.5 rounded bg-sky-100 text-sky-600 text-[10px] font-semibold leading-none">
+                        {entry.platform}
+                      </span>
+                    )}
+                    {entry.mediaType && (
+                      <span className="shrink-0 px-1 py-0.5 rounded bg-gray-100 text-gray-500 text-[10px] font-medium leading-none">
+                        {entry.mediaType}
+                      </span>
+                    )}
+                    <p className="text-sm font-medium text-gray-800 truncate">
+                      {entry.file.name}
+                    </p>
+                  </div>
                   <p className="text-xs text-gray-400 truncate">
-                    caption: {(entry.caption ?? filenameToCaption(entry.file.name)) || "(空)"}
+                    {(entry.caption ?? filenameToCaption(entry.file.name)) || "(キャプションなし)"}
                   </p>
+                  {/* X メトリクス */}
+                  {entry.platform === "X" && (
+                    <div className="flex flex-wrap gap-1">
+                      <MetricChip icon="👍" value={entry.likes} />
+                      <MetricChip icon="💬" value={entry.comments} />
+                      <MetricChip icon="🔁" value={entry.shares} />
+                      <MetricChip icon="👁" value={entry.views} />
+                      {computeEr(entry) != null && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] bg-emerald-50 border border-emerald-100 text-emerald-600 font-medium">
+                          ER {computeEr(entry)}%
+                        </span>
+                      )}
+                    </div>
+                  )}
                   <StatusBadge status={entry.status} />
                   {entry.error && (
                     <p className="text-xs text-red-500 break-all leading-snug">
